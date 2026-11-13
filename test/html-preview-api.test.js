@@ -1,0 +1,10 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {createReaderServer} from '../lib/reader-server.js';
+test('local HTML capability is scoped, revoked on change/switch, and cannot authorize generic APIs',async()=>{
+const dir=await fs.mkdtemp(path.join(os.tmpdir(),'modu-cap-'));const h=path.join(dir,'page.html'),m=path.join(dir,'note.md');await fs.writeFile(h,'<!doctype html><button>First</button>');await fs.writeFile(m,'# Note');
+const server=createReaderServer({rootDir:path.resolve('.'),samplePath:m,pollMs:100});await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}`;
+try{const shell=await(await fetch(base)).text();const token=shell.match(/name="md-token" content="([^"]+)"/)[1];const api=(url,body,auth=token)=>fetch(base+url,{method:body?'POST':'GET',headers:{'X-MD-Token':auth,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+const d=(await(await api('/api/open',{path:h})).json()).doc;assert.equal(d.kind,'html');assert.equal(d.html,undefined);assert.ok(d.previewUrl);const cap=new URL(d.previewUrl,base).searchParams.get('cap');assert.notEqual(cap,token);assert.equal((await api('/api/state',null,cap)).status,401);assert.equal((await fetch(base+d.previewUrl)).status,200);assert.equal((await fetch(base+'/api/html-preview?cap='+token)).status,410);assert.equal((await api('/api/share',{action:'start'})).status,415);
+await fs.writeFile(h,'<button>Second</button>');assert.equal((await fetch(base+d.previewUrl)).status,410);const next=(await(await api('/api/open',{path:h})).json()).doc;assert.notEqual(next.previewUrl,d.previewUrl);const response=await fetch(base+next.previewUrl);assert.match(response.headers.get('content-security-policy'),/sandbox allow-scripts/);assert.match(await response.text(),/modu-preview-ready/);
+await api('/api/open',{path:m});assert.equal((await fetch(base+next.previewUrl)).status,410);
+}finally{server.readerShutdown();await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true})}
+});

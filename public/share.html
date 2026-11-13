@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3eee3">
+  <meta name="referrer" content="no-referrer">
+  <title>墨读 · iPad 阅读</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/share.css">
+  <script src="/share.js" defer></script>
+</head>
+<body class="share-body">
+  <a class="skip-link" href="#share-reader">跳到正文</a>
+
+  <svg class="svg-sprite" aria-hidden="true" width="0" height="0">
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5Z"></path><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5Z"></path></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2.5v2M12 19.5v2M4.3 4.3l1.4 1.4M18.3 18.3l1.4 1.4M2.5 12h2M19.5 12h2M4.3 19.7l1.4-1.4M18.3 5.7l1.4-1.4"></path></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15.1A8.2 8.2 0 0 1 8.9 4a8.4 8.4 0 1 0 11.1 11.1Z"></path></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h3M11 12h9M4 18h8M16 18h4"></path><circle cx="16" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="14" cy="18" r="2"></circle></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10" width="15" height="10" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11v5M12 7.7v.6"></path></symbol>
+    <symbol id="i-ipad" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2.5"></rect><path d="M10 18h4"></path></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 8.5A8 8 0 1 0 20 14"></path><path d="M19.5 3.8v4.7h-4.7"></path></symbol>
+  </svg>
+
+  <div class="share-app" id="share-app">
+    <header class="share-topbar">
+      <div class="share-brand" aria-label="墨读">
+        <span class="brand-seal" aria-hidden="true">墨</span>
+        <span class="share-brand-copy">
+          <span class="share-brand-name">墨读</span>
+          <span class="share-brand-sub">LAN · READ ONLY</span>
+        </span>
+      </div>
+
+      <div class="share-doc-head">
+        <p class="share-kicker">iPad 阅读 · 只读</p>
+        <h1 class="share-file-title" id="share-file-name">正在连接 Mac…</h1>
+        <p class="share-file-meta" id="share-file-meta">文稿只在 Mac 与这台 iPad 之间传递</p>
+      </div>
+
+      <div class="share-actions">
+        <button class="icon-button" id="share-outline-toggle" type="button" aria-label="打开目录" aria-expanded="false" title="目录">
+          <svg class="icon"><use href="#i-book"></use></svg>
+        </button>
+        <button class="icon-button" id="share-theme-toggle" type="button" aria-label="切换主题" title="切换主题">
+          <svg class="icon theme-icon-light"><use href="#i-sun"></use></svg>
+          <svg class="icon theme-icon-dark"><use href="#i-moon"></use></svg>
+        </button>
+        <button class="icon-button" id="share-settings-toggle" type="button" aria-label="阅读设置" aria-expanded="false" title="阅读设置">
+          <svg class="icon"><use href="#i-sliders"></use></svg>
+        </button>
+      </div>
+      <div class="progress-track" aria-hidden="true"><span id="share-progress"></span></div>
+    </header>
+
+    <div class="share-rail">
+      <div class="status-chip" id="share-status" data-state="connecting" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="share-status-text">正在连接</span>
+      </div>
+      <div class="share-rail-meta">
+        <span id="share-sync-detail">等待 Mac 上的墨读…</span>
+        <button class="update-pill" id="share-update-pill" type="button" hidden>正文刚刚更新</button>
+      </div>
+      <span class="share-readonly-badge"><svg class="icon"><use href="#i-lock"></use></svg>只读</span>
+    </div>
+
+    <div class="reader-alert" id="share-alert" hidden data-kind="info" role="alert">
+      <svg class="icon"><use href="#i-info"></use></svg>
+      <div class="alert-copy">
+        <strong id="share-alert-title">提示</strong>
+        <span id="share-alert-detail"></span>
+      </div>
+    </div>
+
+    <main class="share-reader" id="share-reader" tabindex="-1">
+      <div class="share-loading" id="share-loading">
+        <span class="loading-seal" aria-hidden="true">墨</span>
+        <p>正在从 Mac 取来这一页…</p>
+      </div>
+
+      <div class="share-auth" id="share-auth" hidden>
+        <span class="auth-seal" aria-hidden="true">墨</span>
+        <h2 id="share-auth-title">需要完整的分享链接</h2>
+        <p id="share-auth-detail">请在 Mac 的墨读中点击“iPad 阅读”，复制完整链接后再打开。</p>
+      </div>
+
+      <article class="doc" id="share-doc" aria-label="文档正文" hidden></article>
+      <div class="share-end" id="share-end" hidden>
+        局域网 HTTP 未加密 · 仅限可信 WiFi · 请保持 Mac 与墨读运行
+      </div>
+    </main>
+  </div>
+
+  <div class="scrim" id="share-scrim" hidden></div>
+
+  <aside class="share-outline-panel" id="share-outline-panel" aria-label="文档目录" aria-hidden="true">
+    <div class="share-outline-head">
+      <div>
+        <p class="panel-eyebrow">CONTENTS</p>
+        <h2>目录</h2>
+      </div>
+      <button class="icon-button" id="share-outline-close" type="button" aria-label="关闭目录">
+        <svg class="icon"><use href="#i-x"></use></svg>
+      </button>
+    </div>
+    <nav class="outline" id="share-outline">
+      <p class="outline-empty" id="share-outline-empty">打开文稿后，<br>章节会在这里展开。</p>
+    </nav>
+    <p class="share-outline-note">左右滑动不会翻页，<br>目录只属于这一份文稿。</p>
+  </aside>
+
+  <section class="settings-panel share-settings" id="share-settings" role="dialog" aria-label="阅读设置" hidden>
+    <div class="settings-head">
+      <div>
+        <p class="panel-eyebrow">PREFERENCES</p>
+        <h2>阅读设置</h2>
+      </div>
+      <button class="icon-button" id="share-settings-close" type="button" aria-label="关闭设置">
+        <svg class="icon"><use href="#i-x"></use></svg>
+      </button>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label"><span>主题</span></div>
+      <div class="segmented" id="share-theme-segment" role="group" aria-label="主题">
+        <button type="button" data-theme-choice="light"><svg class="icon"><use href="#i-sun"></use></svg>浅色</button>
+        <button type="button" data-theme-choice="dark"><svg class="icon"><use href="#i-moon"></use></svg>深色</button>
+      </div>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label">
+        <label for="share-font-range">正文字号</label>
+        <output id="share-font-output" for="share-font-range">17 px</output>
+      </div>
+      <input class="range" id="share-font-range" type="range" min="14" max="24" step="1" value="17">
+      <div class="range-ends"><span>小</span><span>大</span></div>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-label"><span>版心宽度</span></div>
+      <div class="segmented" id="share-width-segment" role="group" aria-label="版心宽度">
+        <button type="button" data-width-choice="narrow">窄</button>
+        <button type="button" data-width-choice="normal">适中</button>
+        <button type="button" data-width-choice="wide">宽</button>
+      </div>
+    </div>
+
+    <div class="setting-group share-home-hint">
+      <div class="setting-label"><span>添加到主屏幕</span></div>
+      <p>在 Safari 点“分享”按钮，再选“添加到主屏幕”，可以留一个快捷入口。</p>
+      <p class="share-home-warning">这只是快捷方式：不会离线保存正文，仍需要 Mac 保持运行、与 iPad 处于同一 WiFi。</p>
+    </div>
+
+    <div class="share-security-note">
+      <svg class="icon"><use href="#i-lock"></use></svg>
+      <p><strong>局域网 HTTP 未加密。</strong>只适合可信的家庭或办公 WiFi；不要用于公共网络，也不提供公网访问。</p>
+    </div>
+  </section>
+
+  <div class="toast-region" id="share-toast-region" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>

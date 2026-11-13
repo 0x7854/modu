@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3eee3">
+  <meta name="md-token" content="__MD_TOKEN__">
+  <meta name="md-sample-path" content="__MD_SAMPLE_PATH__">
+  <meta name="modu-frame-timeout-ms" content="12000">
+  <meta name="modu-cloud-library-poll-ms" content="15000">
+  <title>墨读 · 本地 Markdown 与 HTML 阅读器</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#reader-scroll">跳到正文</a>
+
+  <svg class="svg-sprite" aria-hidden="true" width="0" height="0">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.2 4.2"></path></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2.5v2M12 19.5v2M4.3 4.3l1.4 1.4M18.3 18.3l1.4 1.4M2.5 12h2M19.5 12h2M4.3 19.7l1.4-1.4M18.3 5.7l1.4-1.4"></path></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15.1A8.2 8.2 0 0 1 8.9 4a8.4 8.4 0 1 0 11.1 11.1Z"></path></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h3M11 12h9M4 18h8M16 18h4"></path><circle cx="16" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="14" cy="18" r="2"></circle></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h4l2 2h6a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 19H6a2.5 2.5 0 0 1-2.5-2.5Z"></path></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M4.5 12h15M13 5.5l6.5 6.5L13 18.5"></path></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"></path></symbol>
+    <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m6 14.5 6-6 6 6"></path></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"></path></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 8.5A8 8 0 1 0 20 14"></path><path d="M19.5 3.8v4.7h-4.7"></path></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8.5 8.5"></path><path d="M18.5 13.5V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1h5.5"></path></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5Z"></path><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5Z"></path></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.2-5 4.1 10 2.2-5H21"></path></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10" width="15" height="10" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6Z"></path><path d="M14 3v4h4M9 12h6M9 16h4"></path></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11v5M12 7.7v.6"></path></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9 3.8h6M7 7l.7 12.2h8.6L17 7M10 10.5v5M14 10.5v5"></path></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5c.5 4.6 2.9 7 7.5 7.5-4.6.5-7 2.9-7.5 7.5-.5-4.6-2.9-7-7.5-7.5 4.6-.5 7-2.9 7.5-7.5Z"></path></symbol>
+    <symbol id="i-ipad" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2.5"></rect><path d="M10 18h4"></path></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2"></path></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5h10.2a3.8 3.8 0 0 0 .4-7.6 5.7 5.7 0 0 0-10.8-1.2A4.4 4.4 0 0 0 7 18.5Z"></path><path d="M12 16.5v-5M9.7 13.4 12 11l2.3 2.4"></path></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7"></path></symbol>
+  </svg>
+
+  <div class="app-shell" id="app">
+    <div class="scrim" id="scrim" hidden></div>
+
+    <aside class="sidebar" id="sidebar" aria-label="文档导航">
+      <div class="sidebar-inner">
+        <div class="brand-row">
+          <div class="brand">
+            <span class="brand-seal" aria-hidden="true">墨</span>
+            <span class="brand-type">
+              <span class="brand-name">墨读</span>
+              <span class="brand-sub">MUDU · LOCAL READER</span>
+            </span>
+          </div>
+          <button class="icon-button sidebar-close" id="sidebar-close" type="button" aria-label="收起侧栏">
+            <svg class="icon"><use href="#i-x"></use></svg>
+          </button>
+        </div>
+
+        <div class="sidebar-scroll">
+          <section class="open-section" aria-labelledby="open-label">
+            <div class="section-eyebrow" id="open-label">
+              <span>打开本地文档</span>
+              <span class="shortcut-key">⌘ O</span>
+            </div>
+            <form class="path-form" id="path-form" novalidate>
+              <label class="sr-only" for="path-input">Markdown 或 HTML 文件绝对路径</label>
+              <div class="path-field">
+                <svg class="icon path-icon"><use href="#i-file"></use></svg>
+                <input id="path-input" name="path" type="text" placeholder="/Users/…/笔记.md 或 体验.html" spellcheck="false" autocomplete="off" autocapitalize="off">
+                <button class="path-submit" type="submit" aria-label="打开此路径">
+                  <svg class="icon"><use href="#i-arrow-right"></use></svg>
+                </button>
+              </div>
+            </form>
+            <button class="button button-primary pick-button" id="pick-button" type="button">
+              <svg class="icon"><use href="#i-folder"></use></svg>
+              <span>从访达选择</span>
+            </button>
+            <p class="open-note">
+              <span class="pulse-dot" aria-hidden="true"></span>
+              直接读取原文件，不复制、不写入
+            </p>
+          </section>
+
+          <section class="recent-section" aria-labelledby="recent-label">
+            <div class="section-heading">
+              <h2 class="section-eyebrow" id="recent-label">最近阅读</h2>
+              <button class="text-button" id="recent-clear" type="button" hidden>清除</button>
+            </div>
+            <ul class="recent-list" id="recent-list">
+              <li class="recent-empty">打开过的文稿会安静地留在这里。</li>
+            </ul>
+          </section>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="privacy-line">
+            <svg class="icon"><use href="#i-lock"></use></svg>
+            <span>仅在本机 · 127.0.0.1</span>
+          </div>
+          <p>仅主动加入云端文库的文稿会同步。</p>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-column" aria-label="阅读区">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="sidebar-toggle" type="button" aria-label="展开侧栏" aria-controls="sidebar" aria-expanded="false">
+          <svg class="icon"><use href="#i-menu"></use></svg>
+        </button>
+        <div class="document-identity">
+          <div class="identity-kicker-row">
+            <p class="identity-kicker" id="identity-kicker">静候一页文字</p>
+            <span class="doc-kind-badge" id="doc-kind-badge" hidden>MD</span>
+          </div>
+          <h1 class="file-title" id="file-name">尚未打开文档</h1>
+          <p class="file-path" id="file-path" title="">将左侧路径粘贴到这里，或从访达选择</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="tool-button cloud-trigger" id="cloud-trigger" type="button" aria-label="云端文库" aria-expanded="false" aria-controls="cloud-panel" title="云端文库与同步">
+            <svg class="icon"><use href="#i-cloud"></use></svg>
+            <span>云端</span>
+            <i class="cloud-badge" id="cloud-badge" aria-hidden="true" hidden></i>
+          </button>
+          <button class="tool-button share-trigger" id="share-trigger" type="button" aria-label="iPad 阅读分享" aria-expanded="false" aria-controls="share-panel" title="在 iPad 上阅读当前文档">
+            <svg class="icon"><use href="#i-ipad"></use></svg>
+            <span>iPad 阅读</span>
+            <i class="share-live-dot" id="share-live-dot" aria-hidden="true" hidden></i>
+          </button>
+          <button class="tool-button find-trigger" id="find-trigger" type="button" aria-label="在文档中查找（⌘F）" title="查找（⌘F）">
+            <svg class="icon"><use href="#i-search"></use></svg>
+            <span>查找</span>
+          </button>
+          <button class="icon-button theme-quick" id="theme-toggle" type="button" aria-label="切换深浅色主题" title="切换主题">
+            <svg class="icon theme-icon-light"><use href="#i-sun"></use></svg>
+            <svg class="icon theme-icon-dark"><use href="#i-moon"></use></svg>
+          </button>
+          <button class="icon-button" id="settings-toggle" type="button" aria-label="阅读设置" aria-expanded="false" aria-controls="settings-panel" title="阅读设置">
+            <svg class="icon"><use href="#i-sliders"></use></svg>
+          </button>
+        </div>
+        <div class="progress-track" aria-hidden="true"><span id="progress-bar"></span></div>
+      </header>
+
+      <div class="sync-rail">
+        <div class="status-chip" id="status-chip" data-state="idle" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="status-text">等待打开</span>
+        </div>
+        <div class="sync-meta">
+          <span id="sync-detail">选择一份本地 Markdown 或单文件 HTML，开始安静的阅读</span>
+          <button class="update-pill" id="update-pill" type="button" hidden>正文刚刚更新</button>
+        </div>
+      </div>
+
+      <div class="html-mode-note" id="html-mode-note" hidden>
+        <span class="doc-kind-badge">HTML</span>
+        <div class="html-mode-copy">
+          <strong>单文件交互页 · 独立运行</strong>
+          <span>页面里的按钮、滑块和折叠面板都可以操作，但只使用这份 HTML 内嵌的样式、脚本和图片；外部字体、CDN、相邻文件和网络请求会被拦截。刷新或重新打开会复位控件状态，跨设备暂不同步这些状态。iPad 局域网分享仅支持 Markdown，HTML 请用云端文库分享。</span>
+        </div>
+        <div class="html-mode-actions">
+          <button class="button button-ghost html-reload" id="html-reload" type="button">重新加载</button>
+        </div>
+      </div>
+
+      <div class="reader-alert" id="reader-alert" hidden data-kind="info" role="alert">
+        <svg class="icon"><use href="#i-info"></use></svg>
+        <div class="alert-copy">
+          <strong id="alert-title">提示</strong>
+          <span id="alert-detail"></span>
+        </div>
+        <button class="alert-action" id="alert-action" type="button" hidden></button>
+      </div>
+
+      <div class="reader-scroll" id="reader-scroll" tabindex="-1">
+        <section class="welcome" id="welcome" aria-labelledby="welcome-title">
+          <div class="welcome-main">
+            <p class="welcome-eyebrow"><span></span>LOCAL · LIVE · QUIET</p>
+            <h2 class="welcome-title" id="welcome-title">
+              把一页安静的文字，<br>
+              <em>放进光里。</em>
+            </h2>
+            <p class="welcome-copy">
+              墨读是一间安静的本地阅读室：Markdown 从磁盘直达页面，单文件 HTML 则在隔离的独立环境中保持可交互。
+              内容不需要上传；你在编辑器里落笔，这里会在半秒内悄然续上。
+            </p>
+            <div class="welcome-actions">
+              <button class="button button-primary button-large" id="sample-button" type="button">
+                <svg class="icon"><use href="#i-book"></use></svg>
+                <span>阅读示例文稿</span>
+              </button>
+              <button class="button button-ghost button-large" id="welcome-pick-button" type="button">
+                <svg class="icon"><use href="#i-folder"></use></svg>
+                <span>打开本地文件</span>
+              </button>
+            </div>
+            <p class="welcome-tip">
+              也可以把 <kbd>.md</kbd> 或 <kbd>.html</kbd> 文件拖进窗口，或在左侧粘贴绝对路径。
+            </p>
+            <div class="welcome-features">
+              <div class="feature">
+                <span class="feature-icon"><svg class="icon"><use href="#i-pulse"></use></svg></span>
+                <div><strong>原文件实时同步</strong><span>编辑、原子保存、删除恢复都能跟上。</span></div>
+              </div>
+              <div class="feature">
+                <span class="feature-icon"><svg class="icon"><use href="#i-book"></use></svg></span>
+                <div><strong>专注的三栏阅读</strong><span>目录、正文与阅读设置各得其所。</span></div>
+              </div>
+              <div class="feature">
+                <span class="feature-icon"><svg class="icon"><use href="#i-lock"></use></svg></span>
+                <div><strong>只在你的 Mac 上</strong><span>本地服务，无账号，无远端副本。</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="welcome-art" aria-hidden="true">
+            <div class="paper-sheet paper-back"></div>
+            <div class="paper-sheet paper-front">
+              <div class="paper-rule"></div>
+              <div class="paper-lines"><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="paper-seal">读</div>
+              <span class="paper-caption">一卷在手<br>万事从容</span>
+            </div>
+            <div class="art-sun"></div>
+            <div class="art-mark">M</div>
+          </div>
+          <blockquote class="welcome-quote">
+            <span>“</span>
+            读书之乐，不在多，在于一页一页地进入。
+          </blockquote>
+        </section>
+
+        <article class="doc" id="doc-content" aria-label="文档正文" hidden></article>
+        <div class="html-stage" id="html-stage" hidden>
+          <div class="html-frame-host" id="html-frame-host"></div>
+          <div class="html-loading" id="html-loading" hidden role="status" aria-live="polite">
+            <span class="html-loading-ring" aria-hidden="true"></span>
+            <span id="html-loading-text">正在加载交互页…</span>
+          </div>
+          <div class="html-error" id="html-error" hidden role="alert">
+            <span class="doc-kind-badge">HTML</span>
+            <strong id="html-error-title">交互页没有加载</strong>
+            <span id="html-error-detail">检查文件是否完整；依赖相邻文件或外部资源的页面，请改为单文件内嵌。</span>
+            <button class="button button-primary" id="html-error-retry" type="button">重新加载</button>
+          </div>
+        </div>
+        <div class="doc-end" id="doc-end" hidden aria-hidden="true">
+          <span></span><b>墨读</b><span></span>
+        </div>
+      </div>
+
+      <div class="find-bar" id="search-panel" role="search" hidden>
+        <svg class="icon"><use href="#i-search"></use></svg>
+        <label class="sr-only" for="search-input">在文档中查找</label>
+        <input id="search-input" type="text" placeholder="在正文中查找…" autocomplete="off" spellcheck="false">
+        <span class="find-count" id="search-count" aria-live="polite">0 / 0</span>
+        <div class="find-nav">
+          <button class="icon-button" id="search-prev" type="button" aria-label="上一个匹配" title="上一个（⇧↩）">
+            <svg class="icon"><use href="#i-chevron-up"></use></svg>
+          </button>
+          <button class="icon-button" id="search-next" type="button" aria-label="下一个匹配" title="下一个（↩）">
+            <svg class="icon"><use href="#i-chevron-down"></use></svg>
+          </button>
+          <button class="icon-button" id="search-close" type="button" aria-label="关闭查找" title="关闭（Esc）">
+            <svg class="icon"><use href="#i-x"></use></svg>
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <aside class="outline-column" id="outline-column" aria-label="文档目录">
+      <div class="outline-head">
+        <span class="outline-title">目录</span>
+        <span class="outline-count" id="outline-count">0</span>
+      </div>
+      <nav class="outline" id="outline">
+        <p class="outline-empty" id="outline-empty">打开文稿后，<br>章节会在这里展开。</p>
+      </nav>
+      <div class="outline-bottom">
+        <div class="shortcuts-card">
+          <p class="shortcuts-title">键盘</p>
+          <dl>
+            <div><dt>查找</dt><dd><kbd>⌘</kbd><kbd>F</kbd></dd></div>
+            <div><dt>打开</dt><dd><kbd>⌘</kbd><kbd>O</kbd></dd></div>
+            <div><dt>关闭面板</dt><dd><kbd>Esc</kbd></dd></div>
+          </dl>
+        </div>
+        <p class="outline-quote">文字有光，<br>阅读是把它点亮。</p>
+      </div>
+    </aside>
+  </div>
+
+  <section class="settings-panel" id="settings-panel" role="dialog" aria-label="阅读设置" hidden>
+    <div class="settings-head">
+      <div>
+        <p class="panel-eyebrow">PREFERENCES</p>
+        <h2>阅读设置</h2>
+      </div>
+      <button class="icon-button" id="settings-close" type="button" aria-label="关闭设置">
+        <svg class="icon"><use href="#i-x"></use></svg>
+      </button>
+    </div>
+    <p class="settings-html-note" id="settings-html-note" hidden>
+      HTML 交互页的外观由页面自身决定；字号、版心、跟随更新和主题设置不作用于页面内容。页面内的控件状态会在刷新或重新打开时复位。
+    </p>
+    <div class="setting-group" data-markdown-only>
+      <div class="setting-label"><span>主题</span></div>
+      <div class="segmented" id="theme-segment" role="group" aria-label="主题">
+        <button type="button" data-theme-choice="light"><svg class="icon"><use href="#i-sun"></use></svg>浅色</button>
+        <button type="button" data-theme-choice="dark"><svg class="icon"><use href="#i-moon"></use></svg>深色</button>
+      </div>
+    </div>
+    <div class="setting-group" data-markdown-only>
+      <div class="setting-label">
+        <label for="font-range">正文字号</label>
+        <output id="font-output" for="font-range">17 px</output>
+      </div>
+      <input class="range" id="font-range" type="range" min="14" max="24" step="1" value="17">
+      <div class="range-ends"><span>小</span><span>大</span></div>
+    </div>
+    <div class="setting-group" data-markdown-only>
+      <div class="setting-label"><span>版心宽度</span></div>
+      <div class="segmented" id="width-segment" role="group" aria-label="版心宽度">
+        <button type="button" data-width-choice="narrow">窄</button>
+        <button type="button" data-width-choice="normal">适中</button>
+        <button type="button" data-width-choice="wide">宽</button>
+      </div>
+    </div>
+    <div class="setting-group setting-toggle-row" data-markdown-only>
+      <div class="toggle-copy">
+        <label for="follow-toggle">跟随更新</label>
+        <p>开启后，新内容到达时自动滚到文末。</p>
+      </div>
+      <label class="switch">
+        <input id="follow-toggle" type="checkbox">
+        <span></span>
+      </label>
+    </div>
+    <button class="reset-settings" id="settings-reset" type="button" data-markdown-only>恢复默认设置</button>
+  </section>
+
+  <section class="settings-panel share-panel" id="share-panel" role="dialog" aria-label="iPad 阅读分享" hidden>
+    <div class="settings-head">
+      <div>
+        <p class="panel-eyebrow">LAN · READ ONLY</p>
+        <h2>iPad 阅读</h2>
+      </div>
+      <button class="icon-button" id="share-close" type="button" aria-label="关闭分享面板">
+        <svg class="icon"><use href="#i-x"></use></svg>
+      </button>
+    </div>
+
+    <p class="share-panel-note">
+      只有点击下面的按钮才会开启局域网服务。每个分享只包含当时这一份文稿；后来在墨读里打开别的文件，不会自动分享。
+    </p>
+
+    <p class="share-html-note" id="share-html-note" hidden>
+      HTML 交互页暂不支持局域网分享。请先把这份原文件明确加入云端文库，再从云端打开阅读链接。
+    </p>
+
+    <div class="share-panel-empty" id="share-empty" hidden>
+      <strong>先打开一份文稿</strong>
+      <p>打开 Markdown 后，回到这里即可生成 iPad 阅读链接。</p>
+    </div>
+
+    <div id="share-idle" hidden>
+      <p class="share-current-name" id="share-current-name"></p>
+      <button class="button button-primary share-start" id="share-start" type="button">
+        <svg class="icon"><use href="#i-ipad"></use></svg>
+        <span>共享当前文档</span>
+      </button>
+      <p class="share-start-hint">只读 · 不复制正文到其他磁盘 · 撤销后立即失效</p>
+    </div>
+
+    <div id="share-active" hidden>
+      <div class="share-active-head">
+        <span class="share-active-state"><span class="pulse-dot" aria-hidden="true"></span>正在分享</span>
+        <strong id="share-active-name">—</strong>
+      </div>
+
+      <p class="share-other-note" id="share-other-note" hidden>
+        你当前阅读的是另一份文稿。上面这份分享仍只包含原先共享的文件。
+      </p>
+
+      <div class="share-field">
+        <label for="share-address">局域网地址</label>
+        <div class="share-copy-row">
+          <input id="share-address" type="text" readonly spellcheck="false">
+          <button class="share-copy-button" id="share-copy-address" type="button" aria-label="复制局域网地址">
+            <svg class="icon"><use href="#i-copy"></use></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="share-field">
+        <label for="share-link">完整链接（含访问密钥）</label>
+        <div class="share-copy-row">
+          <input id="share-link" type="text" readonly spellcheck="false">
+          <button class="share-copy-button share-copy-primary" id="share-copy-link" type="button">复制链接</button>
+        </div>
+      </div>
+
+      <p class="share-warning">
+        <svg class="icon"><use href="#i-lock"></use></svg>
+        <span>Mac 需保持墨读运行；iPad 与 Mac 必须在同一 WiFi。局域网 HTTP 未加密，只适合可信网络，不提供公网访问。</span>
+      </p>
+
+      <button class="button button-ghost share-replace" id="share-replace" type="button" hidden>
+        改为共享当前文稿
+      </button>
+      <button class="button share-revoke" id="share-revoke" type="button">撤销分享</button>
+    </div>
+
+    <p class="share-panel-foot">LAN 只读接口仅限当前文稿与文档目录内的图片；不开放打开文件、原生选择器或目录浏览。</p>
+  </section>
+
+  <section class="settings-panel cloud-panel" id="cloud-panel" role="dialog" aria-label="云端文库" hidden>
+    <div class="settings-head">
+      <div>
+        <p class="panel-eyebrow">PRIVATE · SYNC</p>
+        <h2>云端文库</h2>
+      </div>
+      <button class="icon-button" id="cloud-close" type="button" aria-label="关闭云端文库">
+        <svg class="icon"><use href="#i-x"></use></svg>
+      </button>
+    </div>
+
+    <p class="cloud-panel-note">
+      只有你在这里主动加入的 Markdown 或单文件 HTML 才会上传。打开阅读、最近阅读和拖入后选择“仅打开”都不会上传文件。
+    </p>
+
+    <div class="cloud-unavailable" id="cloud-unavailable" hidden>
+      <strong>云端同步仅在 Mac 桌面版可用</strong>
+      <p>当前页面没有安全的桌面桥接，不会读取或上传本地文件。</p>
+    </div>
+
+    <div id="cloud-configured" hidden>
+      <div class="cloud-account" id="cloud-account">
+        <span class="cloud-account-dot" aria-hidden="true"></span>
+        <span id="cloud-account-text">尚未配置</span>
+        <button class="text-button" id="cloud-edit" type="button">修改配置</button>
+      </div>
+
+      <div class="cloud-actions">
+        <button class="button button-primary cloud-add-current" id="cloud-add-current" type="button">
+          <svg class="icon"><use href="#i-cloud"></use></svg>
+          <span>加入当前文稿</span>
+        </button>
+        <button class="button button-ghost cloud-sync-now" id="cloud-sync-now" type="button">
+          <svg class="icon"><use href="#i-refresh"></use></svg>
+          <span>手动同步</span>
+        </button>
+      </div>
+
+      <section class="cloud-online" id="cloud-online" hidden aria-labelledby="cloud-online-title">
+        <div class="cloud-online-head">
+          <div>
+            <p class="cloud-online-kicker">CLOUD FOLDERS</p>
+            <h3 id="cloud-online-title">云端文件夹</h3>
+          </div>
+          <button class="text-button cloud-library-refresh" id="cloud-library-refresh" type="button">刷新</button>
+        </div>
+        <p class="cloud-online-note">整理只作用于云端文库，不移动 Mac 上的原文件，也不改变同步配置。</p>
+        <div class="cloud-folder-top">
+          <nav class="cloud-folder-tree" id="cloud-folder-tree" aria-label="云端文件夹"></nav>
+          <button class="cloud-folder-create" id="cloud-folder-create" type="button">新建</button>
+        </div>
+        <div class="cloud-online-view-head">
+          <div class="cloud-folder-breadcrumb" id="cloud-folder-breadcrumb" aria-live="polite"></div>
+          <div class="cloud-folder-actions" id="cloud-folder-actions" hidden>
+            <button class="cloud-mini-button" id="cloud-folder-rename" type="button">重命名</button>
+            <button class="cloud-mini-button" id="cloud-folder-move" type="button">移动</button>
+            <button class="cloud-mini-button is-danger" id="cloud-folder-delete" type="button">删除</button>
+          </div>
+        </div>
+        <div class="cloud-library-state" id="cloud-library-state" role="status" hidden>
+          <span id="cloud-library-state-text"></span>
+          <button class="cloud-library-retry" id="cloud-library-retry" type="button" hidden>重试</button>
+        </div>
+        <ul class="cloud-online-docs" id="cloud-online-docs" aria-label="云端文稿"></ul>
+        <p class="cloud-online-empty" id="cloud-online-empty" hidden></p>
+      </section>
+
+      <div class="cloud-doc-head">
+        <span>本机同步文稿</span>
+        <span id="cloud-doc-count">0</span>
+      </div>
+      <ul class="cloud-doc-list" id="cloud-doc-list">
+        <li class="cloud-empty">还没有主动加入的文稿。</li>
+      </ul>
+
+      <p class="cloud-pending-note" id="cloud-pending-note" hidden></p>
+    </div>
+
+    <div class="cloud-config" id="cloud-config" hidden>
+      <div class="cloud-field">
+        <label for="cloud-server-url">云服务地址</label>
+        <input id="cloud-server-url" type="url" inputmode="url" placeholder="https://reader.example.com" spellcheck="false" autocomplete="off" autocapitalize="none">
+        <small>公网必须 HTTPS；只有 localhost 测试地址允许 HTTP。</small>
+      </div>
+      <div class="cloud-field">
+        <label for="cloud-token">同步令牌</label>
+        <input id="cloud-token" type="password" placeholder="配置后留空表示保持不变" spellcheck="false" autocomplete="new-password">
+        <small>只保存在这台 Mac 的私密设置文件中，不写入源码、不显示在列表里。</small>
+      </div>
+      <p class="cloud-error" id="cloud-error" role="alert" hidden></p>
+      <button class="button button-primary cloud-save" id="cloud-save" type="button">保存并测试连接</button>
+    </div>
+
+    <p class="cloud-panel-foot">
+      支持 .md / .markdown / .html / .htm。正文由 Mac 主动上传；云端只读。HTML 只上传这一份单文件，不包含相邻脚本、样式、图片或父目录；图片暂不同步，云端会明确显示占位。跨设备暂不同步页面内的控件状态。
+    </p>
+  </section>
+
+  <div class="cloud-dialog-layer" id="cloud-library-dialog" hidden>
+    <form class="cloud-library-dialog" id="cloud-library-form" role="dialog" aria-modal="true" aria-labelledby="cloud-library-title">
+      <div class="cloud-dialog-head">
+        <div>
+          <p class="panel-eyebrow" id="cloud-library-kicker">CLOUD FOLDERS</p>
+          <h2 id="cloud-library-title">整理云端文件夹</h2>
+        </div>
+        <button class="icon-button" id="cloud-library-close" type="button" aria-label="取消并关闭">
+          <svg class="icon"><use href="#i-x"></use></svg>
+        </button>
+      </div>
+      <p class="cloud-dialog-copy" id="cloud-library-copy"></p>
+      <p class="cloud-dialog-subject" id="cloud-library-subject" hidden></p>
+      <div class="cloud-dialog-field" id="cloud-library-name-field" hidden>
+        <label for="cloud-library-name">文件夹名称</label>
+        <input id="cloud-library-name" name="folder-name" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="例如：读书笔记">
+        <small>1–80 个字符；不能包含斜杠或控制字符。</small>
+      </div>
+      <div class="cloud-dialog-field" id="cloud-library-parent-field" hidden>
+        <label for="cloud-library-parent">位置</label>
+        <select id="cloud-library-parent" name="folder-parent"></select>
+      </div>
+      <p class="cloud-dialog-error" id="cloud-library-error" role="alert" hidden></p>
+      <div class="cloud-dialog-actions">
+        <button class="text-button" id="cloud-library-cancel" type="button">取消</button>
+        <button class="button button-primary" id="cloud-library-submit" type="submit">保存</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="drop-overlay" id="drop-overlay" hidden>
+    <div class="drop-card">
+      <div class="drop-glyph"><svg class="icon"><use href="#i-file"></use></svg></div>
+      <strong>松手后选择去向</strong>
+      <span>Markdown · .md / .markdown</span>
+      <span>单文件 HTML · .html / .htm</span>
+      <small>仅打开阅读不会上传；加入云端文库只上传这一份文件。</small>
+    </div>
+  </div>
+
+  <section class="drop-choice" id="drop-choice" role="dialog" aria-modal="true" aria-labelledby="drop-choice-title" hidden>
+    <div class="drop-choice-card">
+      <div class="drop-choice-glyph"><svg class="icon"><use href="#i-file"></use></svg></div>
+      <p class="panel-eyebrow">DROP · CHOOSE</p>
+      <h2 id="drop-choice-title">这份文稿要做什么？</h2>
+      <p class="drop-choice-name" id="drop-choice-name">—</p>
+      <p class="drop-choice-copy">
+        “仅打开阅读”保持本机实时阅读，HTML 也能直接交互，不会上传。
+        “加入云端文库”才会把这一份文件正文上传到你配置的云服务；不会带上相邻文件或整个目录。
+      </p>
+      <div class="drop-choice-actions">
+        <button class="button button-primary" id="drop-open" type="button">仅打开阅读</button>
+        <button class="button button-ghost" id="drop-add" type="button">加入云端文库</button>
+        <button class="text-button drop-choice-cancel" id="drop-cancel" type="button">取消</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>

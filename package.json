@@ -1,0 +1,58 @@
+{
+  "name": "modu-reader",
+  "version": "1.3.0",
+  "description": "墨读 · macOS 实时 Markdown / HTML 阅读器与自托管云文库",
+  "main": "electron/main.cjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0x7854/modu.git"
+  },
+  "homepage": "https://github.com/0x7854/modu",
+  "bugs": {
+    "url": "https://github.com/0x7854/modu/issues"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "author": "墨读 contributors",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "start": "electron .",
+    "start:web": "node server.js",
+    "start:cloud": "node cloud/server.js",
+    "manage:cloud": "node cloud/manage.js",
+    "test": "node --test test/integration.test.js test/share.test.js test/cloud.test.js test/sync-client.test.js",
+    "test:cloud": "node --test test/cloud.test.js test/sync-client.test.js",
+    "test:cloud-web": "node --test test/cloud-web.test.js",
+    "test:mac-ui": "node --test test/mac-cloud-ui.test.js",
+    "build:icon": "node scripts/build-icon.mjs",
+    "pack": "npm run build:icon && node scripts/pack-app.mjs",
+    "pack:cloud": "node scripts/pack-cloud.mjs",
+    "test:packaged": "node --test test/packaged.test.js",
+    "test:ipad": "node --test test/ipad-webview.test.js",
+    "verify": "npm test && npm run pack && npm run test:packaged",
+    "test:html": "node --test test/html-cloud.test.js test/html-preview-api.test.js test/html-mac.test.js"
+  },
+  "keywords": [
+    "markdown",
+    "electron",
+    "macos"
+  ],
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "dompurify": "^3.4.17",
+    "highlight.js": "^11.12.0",
+    "jsdom": "^29.1.1",
+    "markdown-it": "^15.0.3",
+    "markdown-it-task-lists": "^2.1.1"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.3.1",
+    "playwright": "^1.65.0"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "modu-cloud",
+  "version": "1.3.0",
+  "private": true,
+  "description": "墨读自托管云文档库：独立 Node 低内存只读 Markdown 服务",
+  "license": "ISC",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "manage": "node manage.js"
+  }
+}

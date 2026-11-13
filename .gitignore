@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+
+# Build, packaging and test outputs
+.build/
+dist/
+outputs/
+work/
+build/icon-1024.png
+*.app/
+*.dmg
+*.pkg
+*.zip
+*.tar.gz
+*.sha256
+test-results/
+playwright-report/
+native-ui-failure.png
+mac-folders-acceptance.png
+ipad-folders-acceptance.png
+
+# Runtime data, credentials and local profiles
+data/
+cloud/data/
+**/data/
+credentials/
+**/credentials/
+**/credentials*
+cloud-sync.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+*.kdbx
+
+# Environment files (keep checked-in examples)
+.env
+.env.*
+!.env.example
+!**/*.env.example
+**/cloud.env
+!deploy/*.env.example
+
+# Private local notes and logs
+private/
+private-*
+*.private.*
+*.local.md
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# macOS / editor noise
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+*~

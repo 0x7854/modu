@@ -1,0 +1,900 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>山岚预算 · 墨读单文件 HTML 体验</title>
+<style>
+  :root {
+    --ink: #23362d;
+    --ink-soft: #55675c;
+    --ink-faint: #8b978d;
+    --paper: #f7f1e5;
+    --paper-deep: #efe5d4;
+    --card: #fffdf8;
+    --accent: #2f5a48;
+    --accent-soft: #dce7dd;
+    --terracotta: #bf6a4c;
+    --gold: #c8a25d;
+    --line: rgba(48, 72, 60, 0.13);
+    --shadow: 0 24px 60px -30px rgba(40, 56, 46, 0.34);
+    --display: "Songti SC", "STSong", "Noto Serif SC", Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: clamp(20px, 4vw, 54px) clamp(16px, 4vw, 48px) 42px;
+    background:
+      radial-gradient(900px 500px at 12% -8%, rgba(191, 106, 76, 0.12), transparent 65%),
+      radial-gradient(760px 540px at 96% 8%, rgba(47, 90, 72, 0.11), transparent 70%),
+      linear-gradient(180deg, #faf5eb 0%, #f3ecdd 52%, #ede3d2 100%);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.32;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.78' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.13'/%3E%3C/svg%3E");
+    mix-blend-mode: multiply;
+  }
+
+  .app {
+    position: relative;
+    z-index: 1;
+    width: min(1080px, 100%);
+    margin: 0 auto;
+  }
+
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: clamp(24px, 4vw, 40px);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    min-width: 0;
+  }
+
+  .seal {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    border-radius: 5px 13px 7px 12px;
+    background: linear-gradient(145deg, #3f6f59, #244736);
+    color: #f8f2e6;
+    font-family: var(--display);
+    font-size: 23px;
+    box-shadow: inset 0 0 0 3px rgba(248, 242, 230, 0.12), 0 10px 20px -12px rgba(36, 71, 54, 0.7);
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    line-height: 1.2;
+  }
+
+  .brand p {
+    margin: 3px 0 0;
+    color: var(--ink-faint);
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .file-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: 0 0 auto;
+    padding: 6px 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(255, 253, 248, 0.56);
+    color: var(--ink-soft);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    backdrop-filter: blur(8px);
+  }
+
+  .file-pill i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--terracotta);
+    box-shadow: 0 0 0 4px rgba(191, 106, 76, 0.12);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.16fr) minmax(280px, 0.84fr);
+    align-items: center;
+    gap: clamp(24px, 5vw, 58px);
+    margin-bottom: clamp(26px, 4.6vw, 46px);
+  }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 16px;
+    color: var(--terracotta);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+  }
+
+  .eyebrow::before {
+    content: "";
+    width: 24px;
+    height: 1px;
+    background: currentColor;
+    opacity: 0.55;
+  }
+
+  .hero h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: clamp(36px, 5.2vw, 62px);
+    font-weight: 600;
+    letter-spacing: -0.045em;
+    line-height: 1.18;
+    text-wrap: balance;
+  }
+
+  .hero h2 em {
+    color: var(--terracotta);
+    font-style: italic;
+    font-weight: 500;
+  }
+
+  .lede {
+    max-width: 520px;
+    margin: 18px 0 0;
+    color: var(--ink-soft);
+    font-size: clamp(12px, 1.3vw, 14px);
+    line-height: 1.9;
+  }
+
+  .hero-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 22px;
+  }
+
+  .stat {
+    padding: 8px 11px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: rgba(255, 253, 248, 0.52);
+    color: var(--ink-faint);
+    font-size: 9px;
+    letter-spacing: 0.05em;
+  }
+
+  .stat strong {
+    display: block;
+    margin-top: 1px;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+
+  .hero-art {
+    position: relative;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid rgba(255, 253, 248, 0.48);
+    border-radius: 24px 62px 20px 52px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+    transform: rotate(1.2deg);
+  }
+
+  .hero-art img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .hero-art figcaption {
+    position: absolute;
+    right: 13px;
+    bottom: 12px;
+    left: 13px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: rgba(247, 241, 229, 0.86);
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-shadow: 0 1px 8px rgba(28, 47, 38, 0.45);
+  }
+
+  .board {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background:
+      linear-gradient(160deg, rgba(255, 255, 255, 0.64), transparent 44%),
+      var(--card);
+    box-shadow: var(--shadow);
+  }
+
+  .board-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding: clamp(20px, 3vw, 29px) clamp(20px, 3.4vw, 34px) 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .board-head .label {
+    margin: 0 0 2px;
+    color: var(--ink-faint);
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: 0.14em;
+  }
+
+  .income {
+    margin: 0;
+    font-family: var(--display);
+    font-size: clamp(30px, 4vw, 44px);
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+  }
+
+  .income small {
+    color: var(--ink-faint);
+    font-family: var(--sans);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }
+
+  .reset {
+    min-height: 30px;
+    padding: 0 11px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: 9.5px;
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s, border-color 0.18s;
+  }
+
+  .reset:hover {
+    border-color: rgba(47, 90, 72, 0.3);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .plan-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.38fr) minmax(230px, 0.62fr);
+  }
+
+  .sliders {
+    padding: clamp(20px, 3vw, 30px) clamp(20px, 3.4vw, 34px);
+  }
+
+  .slider-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px 26px;
+  }
+
+  .slider-row {
+    min-width: 0;
+  }
+
+  .slider-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .slider-head label {
+    color: var(--ink-soft);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .slider-head output {
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: 20px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent) var(--fill, 40%), rgba(48, 72, 60, 0.13) 0);
+  }
+
+  input[type="range"]::-moz-range-track {
+    height: 3px;
+    border-radius: 999px;
+    background: rgba(48, 72, 60, 0.13);
+  }
+
+  input[type="range"]::-moz-range-progress {
+    height: 3px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    margin-top: -6px;
+    border: 2.5px solid var(--card);
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 2px 7px rgba(35, 54, 45, 0.28);
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 2.5px solid var(--card);
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 2px 7px rgba(35, 54, 45, 0.28);
+  }
+
+  input[type="range"]:focus-visible {
+    outline: 2px solid var(--terracotta);
+    outline-offset: 4px;
+    border-radius: 4px;
+  }
+
+  .summary {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 13px;
+    padding: clamp(22px, 3vw, 30px) 24px;
+    border-left: 1px solid var(--line);
+    background:
+      radial-gradient(300px 240px at 80% 0%, rgba(200, 162, 93, 0.12), transparent 72%),
+      rgba(244, 238, 226, 0.46);
+  }
+
+  .donut {
+    --p: 80;
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 126px;
+    height: 126px;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent) calc(var(--p) * 1%), rgba(48, 72, 60, 0.1) 0);
+  }
+
+  .donut::before {
+    content: "";
+    position: absolute;
+    inset: 11px;
+    border-radius: 50%;
+    background: var(--card);
+  }
+
+  .donut-copy {
+    position: relative;
+    text-align: center;
+  }
+
+  .donut-copy strong {
+    display: block;
+    font-family: var(--display);
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1.1;
+  }
+
+  .donut-copy span {
+    color: var(--ink-faint);
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+  }
+
+  .remaining {
+    text-align: center;
+  }
+
+  .remaining > span {
+    display: block;
+    color: var(--ink-faint);
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: 0.12em;
+  }
+
+  .remaining strong {
+    display: block;
+    margin-top: 2px;
+    color: var(--accent);
+    font-family: var(--display);
+    font-size: clamp(24px, 3vw, 31px);
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+  }
+
+  .remaining.is-over strong { color: var(--terracotta); }
+
+  .remaining small {
+    display: block;
+    max-width: 190px;
+    margin: 4px auto 0;
+    color: var(--ink-faint);
+    font-size: 8.5px;
+    line-height: 1.55;
+  }
+
+  .bar {
+    width: 100%;
+    height: 5px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(48, 72, 60, 0.1);
+  }
+
+  .bar i {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--accent), var(--gold));
+    transition: width 0.25s ease;
+  }
+
+  .balance {
+    width: 100%;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #f8f2e6;
+    font: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    box-shadow: 0 10px 20px -14px rgba(35, 54, 45, 0.8);
+    transition: transform 0.16s, background 0.16s;
+  }
+
+  .balance:hover { background: #274d3c; transform: translateY(-1px); }
+  .balance:active { transform: translateY(0); }
+
+  .fold-card {
+    margin-top: 18px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(255, 253, 248, 0.66);
+  }
+
+  .fold summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .fold summary::-webkit-details-marker { display: none; }
+
+  .fold summary:focus-visible {
+    outline: 2px solid var(--terracotta);
+    outline-offset: -3px;
+  }
+
+  .fold-kicker {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--terracotta);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+  }
+
+  .fold summary strong {
+    font-family: var(--display);
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .chev {
+    display: grid;
+    place-items: center;
+    width: 25px;
+    height: 25px;
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    color: var(--ink-faint);
+    font-size: 11px;
+    transition: transform 0.22s ease, background 0.22s;
+  }
+
+  .fold[open] .chev {
+    transform: rotate(180deg);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .fold-body {
+    padding: 0 20px 18px;
+    border-top: 1px solid var(--line);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th, td {
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    font-size: 10.5px;
+  }
+
+  th {
+    color: var(--ink-faint);
+    font-size: 8.5px;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+  }
+
+  th:last-child, td:last-child { text-align: right; }
+
+  td:last-child {
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  tbody tr:last-child th,
+  tbody tr:last-child td { border-bottom: 0; }
+
+  .fold-note {
+    margin: 8px 0 0;
+    color: var(--ink-faint);
+    font-size: 9px;
+    line-height: 1.65;
+  }
+
+  footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 24px;
+    padding: 0 4px;
+    color: var(--ink-faint);
+    font-size: 8.5px;
+    letter-spacing: 0.04em;
+  }
+
+  footer strong {
+    color: var(--ink-soft);
+    font-weight: 600;
+  }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero-art { max-width: 560px; transform: none; }
+    .plan-grid { grid-template-columns: 1fr; }
+    .summary { border-top: 1px solid var(--line); border-left: 0; }
+  }
+
+  @media (max-width: 640px) {
+    body { padding: 18px 14px 30px; }
+    .masthead { align-items: flex-start; flex-direction: column; gap: 12px; }
+    .file-pill { align-self: flex-start; }
+    .hero h2 { font-size: clamp(32px, 10.2vw, 44px); }
+    .hero-art { border-radius: 18px 40px 16px 30px; }
+    .board { border-radius: 17px; }
+    .board-head { align-items: flex-start; flex-direction: column; gap: 10px; }
+    .slider-grid { grid-template-columns: 1fr; gap: 16px; }
+    .summary { padding: 22px 18px; }
+    .summary .donut { width: 112px; height: 112px; }
+    .fold summary { padding: 14px 15px; }
+    .fold-body { padding: 0 15px 15px; }
+    th, td { padding: 9px 3px; }
+    footer { align-items: flex-start; flex-direction: column; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="masthead">
+    <div class="brand">
+      <span class="seal" aria-hidden="true">岚</span>
+      <div>
+        <h1>山岚预算</h1>
+        <p>SHANLAN · MONTHLY BUDGET</p>
+      </div>
+    </div>
+    <span class="file-pill"><i aria-hidden="true"></i>单文件 HTML · 可直接交互</span>
+  </header>
+
+  <section class="hero" aria-labelledby="hero-title">
+    <div>
+      <p class="eyebrow">一份可以动手的月度预算</p>
+      <h2 id="hero-title">让每一笔花费，<br><em>都落在喜欢的生活里。</em></h2>
+      <p class="lede">
+        拖动下面的滑块，看看这个月的钱如何分配。页面里的样式、脚本和插画都装在这一个文件里，不连接任何外部服务。
+      </p>
+      <div class="hero-stats" aria-label="预算概览">
+        <span class="stat">本月收入<strong>¥18,600</strong></span>
+        <span class="stat">固定储蓄<strong id="save-stat">¥3,000</strong></span>
+        <span class="stat">预算状态<strong id="status-stat">从容</strong></span>
+      </div>
+    </div>
+    <figure class="hero-art">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 520'%3E%3Cdefs%3E%3ClinearGradient id='sky' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23f8ead3'/%3E%3Cstop offset='0.58' stop-color='%23efd6b8'/%3E%3Cstop offset='1' stop-color='%23dfc3a4'/%3E%3C/linearGradient%3E%3ClinearGradient id='far' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23b9c8b7'/%3E%3Cstop offset='1' stop-color='%238ca18d'/%3E%3C/linearGradient%3E%3ClinearGradient id='mid' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%236f8a73'/%3E%3Cstop offset='1' stop-color='%234c6c59'/%3E%3C/linearGradient%3E%3ClinearGradient id='near' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%233b5f4d'/%3E%3Cstop offset='1' stop-color='%23273f34'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='640' height='520' fill='url(%23sky)'/%3E%3Ccircle cx='468' cy='132' r='62' fill='%23cf805d' opacity='0.82'/%3E%3Ccircle cx='468' cy='132' r='88' fill='%23cf805d' opacity='0.12'/%3E%3Cpath d='M0 322 94 232l58 53 56-72 73 88 45-45 63 66 54-74 77 92 120-88v238H0Z' fill='url(%23far)' opacity='0.86'/%3E%3Cpath d='M0 380 82 300l58 58 62-86 90 96 58-52 70 72 64-84 76 82 80-58v122H0Z' fill='url(%23mid)'/%3E%3Cpath d='M0 438 95 356l54 50 73-76 83 88 60-42 72 62 58-62 70 50 75-66v160H0Z' fill='url(%23near)'/%3E%3Cpath d='M254 314c10-18 23-18 33 0 9-14 20-14 29 1' fill='none' stroke='%23273f34' stroke-width='2.4' stroke-linecap='round' opacity='0.5'/%3E%3Cpath d='M132 204c7-11 16-11 23 0 6-9 14-9 20 1' fill='none' stroke='%236f8a73' stroke-width='2' stroke-linecap='round' opacity='0.5'/%3E%3Cellipse cx='320' cy='414' rx='250' ry='26' fill='%23f8ead3' opacity='0.12'/%3E%3C/svg%3E" alt="暖色天空下的层叠山峦与落日">
+      <figcaption><span>山岚 · 七月</span><span>把预算留在纸面上</span></figcaption>
+    </figure>
+  </section>
+
+  <section class="board" aria-labelledby="board-title">
+    <div class="board-head">
+      <div>
+        <p class="label" id="board-title">本月可支配</p>
+        <p class="income" id="income">¥18,600 <small>税后 · 七月</small></p>
+      </div>
+      <button class="reset" id="reset" type="button">恢复默认</button>
+    </div>
+
+    <div class="plan-grid">
+      <div class="sliders">
+        <div class="slider-grid">
+          <div class="slider-row">
+            <div class="slider-head"><label for="range-home">居住</label><output id="out-home" for="range-home">¥5,200</output></div>
+            <input id="range-home" data-cat="home" type="range" min="0" max="12000" step="100" value="5200" aria-label="居住预算">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><label for="range-food">餐饮</label><output id="out-food" for="range-food">¥3,600</output></div>
+            <input id="range-food" data-cat="food" type="range" min="0" max="8000" step="100" value="3600" aria-label="餐饮预算">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><label for="range-move">出行</label><output id="out-move" for="range-move">¥1,200</output></div>
+            <input id="range-move" data-cat="move" type="range" min="0" max="4000" step="100" value="1200" aria-label="出行预算">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><label for="range-fun">休闲</label><output id="out-fun" for="range-fun">¥1,800</output></div>
+            <input id="range-fun" data-cat="fun" type="range" min="0" max="5000" step="100" value="1800" aria-label="休闲预算">
+          </div>
+          <div class="slider-row">
+            <div class="slider-head"><label for="range-save">储蓄</label><output id="out-save" for="range-save">¥3,000</output></div>
+            <input id="range-save" data-cat="save" type="range" min="0" max="10000" step="100" value="3000" aria-label="储蓄预算">
+          </div>
+        </div>
+      </div>
+
+      <aside class="summary" aria-label="预算结果">
+        <div class="donut" id="donut" role="img" aria-label="已安排 80%">
+          <div class="donut-copy"><strong id="used-pct">80%</strong><span>已安排</span></div>
+        </div>
+        <div class="remaining" id="remaining-box" aria-live="polite">
+          <span>本月还能留下</span>
+          <strong id="remaining">¥3,800</strong>
+          <small id="remaining-note">还没有安排完，可以留一点给意外的小惊喜。</small>
+        </div>
+        <div class="bar" aria-hidden="true"><i id="bar"></i></div>
+        <button class="balance" id="balance" type="button">把余额留给储蓄</button>
+      </aside>
+    </div>
+  </section>
+
+  <section class="fold-card" aria-label="预算明细">
+    <details class="fold">
+      <summary>
+        <div><span class="fold-kicker">DETAIL · 明细</span><strong>这个月的钱，去了哪里</strong></div>
+        <span class="chev" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="fold-body">
+        <table>
+          <thead><tr><th scope="col">项目</th><th scope="col">占比</th><th scope="col">金额</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">居住</th><td id="share-home">28%</td><td id="row-home">¥5,200</td></tr>
+            <tr><th scope="row">餐饮</th><td id="share-food">19%</td><td id="row-food">¥3,600</td></tr>
+            <tr><th scope="row">出行</th><td id="share-move">6%</td><td id="row-move">¥1,200</td></tr>
+            <tr><th scope="row">休闲</th><td id="share-fun">10%</td><td id="row-fun">¥1,800</td></tr>
+            <tr><th scope="row">储蓄</th><td id="share-save">16%</td><td id="row-save">¥3,000</td></tr>
+            <tr><th scope="row">未分配</th><td id="share-left">20%</td><td id="row-left">¥3,800</td></tr>
+          </tbody>
+        </table>
+        <p class="fold-note">这只是一个可以随手拖动的示例。所有数字都留在当前页面里；刷新或重新打开后，滑块会回到默认值。</p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    <span><strong>墨读 · HTML 体验</strong> · 样式、脚本与插画全部内嵌</span>
+    <span>无需联网 · 不读取本地文件 · 跨设备状态暂不同步</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var INCOME = 18600;
+  var DEFAULTS = { home: 5200, food: 3600, move: 1200, fun: 1800, save: 3000 };
+  var CATEGORIES = ['home', 'food', 'move', 'fun', 'save'];
+  var MAX = { home: 12000, food: 8000, move: 4000, fun: 5000, save: 10000 };
+  var money = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 });
+  var inputs = {};
+  var outputs = {};
+  var shares = {};
+  var rows = {};
+
+  for (var i = 0; i < CATEGORIES.length; i += 1) {
+    var name = CATEGORIES[i];
+    inputs[name] = document.getElementById('range-' + name);
+    outputs[name] = document.getElementById('out-' + name);
+    shares[name] = document.getElementById('share-' + name);
+    rows[name] = document.getElementById('row-' + name);
+  }
+
+  var donut = document.getElementById('donut');
+  var usedPct = document.getElementById('used-pct');
+  var remaining = document.getElementById('remaining');
+  var remainingBox = document.getElementById('remaining-box');
+  var remainingNote = document.getElementById('remaining-note');
+  var bar = document.getElementById('bar');
+  var saveStat = document.getElementById('save-stat');
+  var statusStat = document.getElementById('status-stat');
+  var shareLeft = document.getElementById('share-left');
+  var rowLeft = document.getElementById('row-left');
+
+  function yuan(value) {
+    return '¥' + money.format(Math.round(value));
+  }
+
+  function valueOf(name) {
+    return Number(inputs[name].value) || 0;
+  }
+
+  function fillTrack(input) {
+    var min = Number(input.min) || 0;
+    var max = Number(input.max) || 100;
+    var ratio = max === min ? 0 : (Number(input.value) - min) / (max - min);
+    input.style.setProperty('--fill', (Math.max(0, Math.min(1, ratio)) * 100) + '%');
+  }
+
+  function render() {
+    var total = 0;
+    for (var i = 0; i < CATEGORIES.length; i += 1) {
+      var name = CATEGORIES[i];
+      var value = valueOf(name);
+      total += value;
+      outputs[name].textContent = yuan(value);
+      rows[name].textContent = yuan(value);
+      shares[name].textContent = Math.round(value / INCOME * 100) + '%';
+      fillTrack(inputs[name]);
+    }
+
+    var left = INCOME - total;
+    var pct = Math.max(0, Math.min(100, Math.round(total / INCOME * 100)));
+    var absoluteLeft = Math.abs(left);
+
+    donut.style.setProperty('--p', String(pct));
+    donut.setAttribute('aria-label', '已安排 ' + pct + '%');
+    usedPct.textContent = pct + '%';
+    bar.style.width = Math.min(100, Math.round(total / INCOME * 100)) + '%';
+    saveStat.textContent = yuan(valueOf('save'));
+    rowLeft.textContent = left >= 0 ? yuan(left) : '超出 ' + yuan(absoluteLeft);
+    shareLeft.textContent = (left >= 0 ? '' : '−') + Math.round(absoluteLeft / INCOME * 100) + '%';
+
+    if (left >= 0) {
+      remainingBox.classList.remove('is-over');
+      remaining.textContent = yuan(left);
+      remainingNote.textContent = left === 0
+        ? '刚刚好。每一笔都安排好，也给未来留了位置。'
+        : '还没有安排完，可以留一点给意外的小惊喜。';
+      statusStat.textContent = left === 0 ? '刚好' : '从容';
+    } else {
+      remainingBox.classList.add('is-over');
+      remaining.textContent = '超出 ' + yuan(absoluteLeft);
+      remainingNote.textContent = '已经越过本月收入，试着调低一项，或把储蓄留到下次。';
+      statusStat.textContent = '需要调整';
+    }
+  }
+
+  for (var j = 0; j < CATEGORIES.length; j += 1) {
+    inputs[CATEGORIES[j]].addEventListener('input', render);
+  }
+
+  document.getElementById('reset').addEventListener('click', function () {
+    for (var i = 0; i < CATEGORIES.length; i += 1) {
+      var name = CATEGORIES[i];
+      inputs[name].value = String(DEFAULTS[name]);
+    }
+    render();
+  });
+
+  document.getElementById('balance').addEventListener('click', function () {
+    var spending = valueOf('home') + valueOf('food') + valueOf('move') + valueOf('fun');
+    var nextSave = Math.max(0, Math.min(MAX.save, INCOME - spending));
+    inputs.save.value = String(Math.round(nextSave / 100) * 100);
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

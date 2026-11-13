@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3eee3">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="墨读">
+  <meta name="application-name" content="墨读">
+  <meta name="modu-poll-ms" content="__MODU_POLL_MS__">
+  <meta name="modu-version" content="__MODU_VERSION__">
+  <meta name="modu-bootstrap-timeout-ms" content="15000">
+  <meta name="modu-document-timeout-ms" content="15000">
+  <meta name="modu-frame-timeout-ms" content="12000">
+  <title>墨读 · 私人云文档库</title>
+  <style>
+    /* Critical shell: paint the brand boot screen before cloud.css arrives.
+       Kept in sync with the .boot rules at the top of cloud.css. */
+    :root {
+      color-scheme: light;
+      --bg: #f2ede2;
+      --ink-muted: #858578;
+      --accent: #55725b;
+      --seal-ink: #f7f0e1;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { color-scheme: dark; --bg: #151711; --ink-muted: #8b8c7e; --accent: #90ab8e; }
+    }
+    html[data-theme="light"] { color-scheme: light; --bg: #f2ede2; --ink-muted: #858578; --accent: #55725b; }
+    html[data-theme="dark"] { color-scheme: dark; --bg: #151711; --ink-muted: #8b8c7e; --accent: #90ab8e; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink-muted);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    [hidden] { display: none !important; }
+    .boot {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: grid;
+      place-content: center;
+      justify-items: center;
+      gap: 12px;
+      padding: 20px;
+      background: var(--bg);
+      text-align: center;
+      font-size: 12px;
+    }
+    .boot p { margin: 0; }
+    .boot-hint { font-size: 10.5px; opacity: 0.72; letter-spacing: 0.04em; }
+    .boot-seal {
+      display: grid;
+      place-items: center;
+      width: 58px;
+      height: 58px;
+      border-radius: 15px;
+      background: var(--accent);
+      color: var(--seal-ink);
+      font-family: "Songti SC", "STSong", serif;
+      font-size: 31px;
+      animation: seal-breathe 1.8s ease-in-out infinite;
+    }
+    @keyframes seal-breathe { 50% { opacity: 0.66; transform: scale(0.96); } }
+    @media (prefers-reduced-motion: reduce) { .boot-seal { animation: none; } }
+  </style>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="preload" href="/cloud.css" as="style">
+  <!-- The full stylesheet is promoted to media=all by cloud.js as soon as it
+       runs, so the critical boot shell can paint first on a slow network. -->
+  <link rel="stylesheet" href="/cloud.css" id="cloud-css" media="print">
+  <noscript><link rel="stylesheet" href="/cloud.css"></noscript>
+  <script src="/vendor/markdown-it.min.js" defer></script>
+  <script src="/vendor/purify.min.js" defer></script>
+  <script src="/cloud.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#reader-scroll">跳到正文</a>
+
+  <section class="auth-screen" id="auth-screen" hidden aria-labelledby="login-title">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-seal" aria-hidden="true">墨</span>
+        <div>
+          <p class="eyebrow">PRIVATE CLOUD LIBRARY</p>
+          <h1 id="login-title">墨读云文档库</h1>
+        </div>
+      </div>
+      <p class="auth-copy">
+        这是一个私人阅读空间。请使用阅读账号登录；Mac 上的同步令牌不能用于这里。
+      </p>
+      <form class="login-form" id="login-form" novalidate>
+        <label for="login-user">用户名</label>
+        <input id="login-user" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required>
+        <label for="login-pass">密码</label>
+        <input id="login-pass" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+        <p class="login-error" id="login-error" role="alert" hidden></p>
+        <button class="primary-button" id="login-submit" type="submit">登录阅读</button>
+      </form>
+      <p class="auth-foot">
+        登录后才加载文档列表与正文。页面不缓存任何人的正文；退出或切换账号会清空当前阅读内容。
+      </p>
+    </div>
+  </section>
+
+  <div class="cloud-shell" id="cloud-shell" hidden>
+    <header class="cloud-topbar">
+      <div class="topbar-brand">
+        <span class="brand-seal brand-seal-small" aria-hidden="true">墨</span>
+        <span class="brand-word">
+          <span class="brand-name">墨读</span>
+          <span class="brand-sub">PRIVATE CLOUD</span>
+        </span>
+      </div>
+
+      <div class="doc-heading">
+        <p class="doc-kicker" id="doc-kicker">私人文库</p>
+        <h1 class="doc-title" id="doc-title">选择一份文稿</h1>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="icon-button library-toggle" id="library-toggle" type="button" aria-label="打开文库列表" aria-expanded="false" aria-controls="library">
+          <span class="icon-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+        </button>
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅色主题" title="切换主题">
+          <span class="theme-mark theme-light" aria-hidden="true">◐</span>
+          <span class="theme-mark theme-dark" aria-hidden="true">◑</span>
+        </button>
+        <button class="text-button logout-button" id="logout-button" type="button">退出</button>
+      </div>
+    </header>
+
+    <div class="cloud-main">
+      <div class="scrim" id="scrim" hidden></div>
+
+      <aside class="library" id="library" aria-label="云端文库" tabindex="-1">
+        <div class="library-head">
+          <div>
+            <p class="eyebrow">LIBRARY</p>
+            <h2>云端文库</h2>
+          </div>
+          <button class="icon-button library-close" id="library-close" type="button" aria-label="收起文库">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <p class="library-note">只有 Mac 上主动加入文库的 Markdown 或单文件 HTML 才会出现在这里。文件夹只整理云端文库，不移动 Mac 上的原文件。</p>
+
+        <section class="library-browse" aria-labelledby="folder-browse-title">
+          <div class="library-browse-head">
+            <span id="folder-browse-title">文件夹</span>
+            <button class="library-mini-button" id="folder-create" type="button">新建文件夹</button>
+          </div>
+          <nav class="folder-tree" id="folder-tree" aria-label="云端文件夹"></nav>
+        </section>
+
+        <div class="library-view">
+          <div class="library-view-head">
+            <div class="library-breadcrumb" id="folder-breadcrumb" aria-live="polite"></div>
+            <div class="folder-actions" id="folder-actions" hidden>
+              <button class="library-mini-button" id="folder-rename" type="button">重命名</button>
+              <button class="library-mini-button" id="folder-move" type="button">移动</button>
+              <button class="library-mini-button is-danger" id="folder-delete" type="button">删除</button>
+            </div>
+          </div>
+          <div class="library-state" id="library-state" role="status" hidden>
+            <span id="library-state-text"></span>
+            <button class="library-state-retry" id="library-state-retry" type="button" hidden>重试</button>
+          </div>
+
+          <nav class="doc-list" id="doc-list" aria-label="文档列表"></nav>
+          <div class="library-empty" id="library-empty" hidden>
+            <p>文库还是空的。</p>
+            <span>在 Mac 墨读里打开文稿，点“加入云端文库”，再手动同步或等待自动同步。</span>
+          </div>
+        </div>
+
+        <div class="library-foot">
+          <span class="user-line" id="user-line">—</span>
+          <span>只读 · 不提供在线编辑</span>
+          <span>文件夹只在云端生效</span>
+          <span>图片暂不同步</span>
+        </div>
+      </aside>
+
+      <main class="reader-wrap" aria-label="云端阅读区">
+        <div class="reader-rail">
+          <div class="status-chip" id="cloud-status" data-state="idle" role="status" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="cloud-status-text">等待选择</span>
+          </div>
+          <span class="reader-meta" id="reader-meta">登录后从文库选择文稿</span>
+        </div>
+
+        <div class="html-mode-note" id="html-mode-note" hidden>
+          <span class="doc-kind-badge">HTML</span>
+          <div>
+            <strong>单文件交互页</strong>
+            <span>支持页面内的按钮与计算。请使用资源内嵌的 HTML；刷新或切换页面后，交互状态会重置。</span>
+          </div>
+        </div>
+
+        <div class="reader-alert" id="cloud-alert" hidden role="alert">
+          <strong id="cloud-alert-title">提示</strong>
+          <span id="cloud-alert-detail"></span>
+        </div>
+
+        <div class="reader-stage">
+          <div class="reader-scroll" id="reader-scroll" tabindex="-1">
+            <section class="cloud-welcome" id="cloud-welcome" aria-labelledby="welcome-title">
+              <p class="welcome-eyebrow">READ · ANYWHERE · PRIVATELY</p>
+              <h2 id="welcome-title">离开 Mac，<br><em>文字仍在。</em></h2>
+              <p class="welcome-copy">
+                墨读云文档库保存你主动加入的 Markdown 与单文件 HTML。Markdown 经过清洗后排版阅读；
+                HTML 交互页在一间独立的脚本沙箱里运行，按钮、计算器、标签页与画布都能使用，
+                但拿不到文库登录态，也不会加载外部网络资源。这里没有在线编辑，也没有其他账户的数据。
+              </p>
+              <ul class="welcome-points">
+                <li><strong>独立登录</strong><span>阅读账号与 Mac 同步令牌分开。</span></li>
+                <li><strong>两种文稿</strong><span>Markdown 排版阅读；HTML 在独立 iframe 沙箱中交互。</span></li>
+                <li><strong>明确限制</strong><span>HTML 建议内嵌 CSS/JS/图片；外部 CDN 与相邻文件不会加载。</span></li>
+              </ul>
+            </section>
+
+            <article class="doc" id="cloud-doc" aria-label="文档正文" hidden></article>
+            <div class="html-stage" id="html-stage" hidden>
+              <div class="html-frame-host" id="html-frame-host"></div>
+              <div class="html-frame-error" id="html-frame-error" hidden role="alert">
+                <span class="doc-kind-badge">HTML</span>
+                <strong id="html-error-title">交互页没有加载</strong>
+                <button id="html-retry" type="button" class="btn">重新加载</button>
+                <span id="html-error-detail">请检查网络后重试；如果文稿依赖相邻文件或 CDN，请改为单文件内嵌资源。</span>
+              </div>
+            </div>
+            <div class="doc-end" id="doc-end" hidden><span></span><b>墨读</b><span></span></div>
+          </div>
+
+          <div class="doc-loading" id="doc-loading" role="status" aria-live="polite" aria-atomic="true" hidden>
+            <div class="doc-loading-card">
+              <span class="doc-loading-ring" aria-hidden="true"></span>
+              <span class="doc-loading-text" id="doc-loading-text">正在加载…</span>
+            </div>
+          </div>
+
+          <!-- Narrow-reader edge navigation is claimed here, above the HTML
+               iframe. The transparent, viewport-fixed strip is touch-only and
+               only armed for an authenticated reader with the drawer closed. -->
+          <div class="edge-nav" id="edge-nav" aria-hidden="true" hidden></div>
+        </div>
+
+        <footer class="reading-footer" id="reading-footer">
+          <span id="footer-status">云端只读 · Markdown 与单文件 HTML</span>
+          <span class="footer-dot" aria-hidden="true"></span>
+          <span id="footer-user">—</span>
+        </footer>
+      </main>
+    </div>
+  </div>
+
+  <div class="boot" id="boot" role="status" aria-live="polite">
+    <span class="boot-seal" aria-hidden="true">墨</span>
+    <p>正在打开私人文库…</p>
+    <p class="boot-hint" id="boot-hint">正在校验登录状态</p>
+  </div>
+
+  <div class="dialog-layer" id="library-dialog" hidden>
+    <form class="library-dialog" id="library-form" role="dialog" aria-modal="true" aria-labelledby="library-dialog-title">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="library-dialog-kicker">LIBRARY</p>
+          <h2 id="library-dialog-title">整理文件夹</h2>
+        </div>
+        <button class="icon-button dialog-close" id="library-dialog-close" type="button" aria-label="取消并关闭">
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+      <p class="dialog-copy" id="library-dialog-copy"></p>
+      <p class="dialog-subject" id="library-dialog-subject" hidden></p>
+      <div class="dialog-field" id="library-name-field" hidden>
+        <label for="library-name">文件夹名称</label>
+        <input id="library-name" name="folder-name" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="例如：读书笔记">
+        <small>1–80 个字符；不能包含斜杠或控制字符。</small>
+      </div>
+      <div class="dialog-field" id="library-parent-field" hidden>
+        <label for="library-parent">位置</label>
+        <select id="library-parent" name="folder-parent"></select>
+      </div>
+      <p class="dialog-error" id="library-dialog-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="text-button dialog-cancel" id="library-dialog-cancel" type="button">取消</button>
+        <button class="primary-button dialog-submit" id="library-dialog-submit" type="submit">保存</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>
