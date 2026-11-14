@@ -29,8 +29,8 @@ server {
 
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
-    # 云端只接收 Markdown 正文；2 MB 文档 + JSON 包装留出余量。
-    client_max_body_size 3m;
+    # 为导入 JSON 的转义预留空间；Node 仍按各接口校验正文上限。
+    client_max_body_size 16m;
     client_body_timeout 20s;
     proxy_read_timeout 60s;
     proxy_send_timeout 60s;

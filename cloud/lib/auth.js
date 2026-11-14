@@ -6,6 +6,11 @@ const scrypt = promisify(crypto.scrypt);
 export const DOC_ID_RE = /^[a-f0-9]{32}$/;
 export const USER_ID_RE = /^[a-f0-9]{24}$/;
 export const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{1,63}$/;
+export const IMPORT_TOKEN_PREFIX = 'modu_import_';
+// The user id is part of the token only so verification can find the one
+// per-user hash file without scanning every account. The secret remains
+// 256 bits of randomness and is never stored in clear text.
+export const IMPORT_TOKEN_RE = /^modu_import_([a-f0-9]{24})_([A-Za-z0-9_-]{43})$/;
 
 export class CloudError extends Error {
   constructor(code, message, status = 400, extra = {}) {
@@ -35,6 +40,22 @@ export function sha256(value) {
 
 export function hashSyncToken(token) {
   return sha256(String(token));
+}
+
+export function hashImportToken(token) {
+  return sha256(String(token));
+}
+
+export function makeImportToken(userId) {
+  if (!USER_ID_RE.test(String(userId || ''))) {
+    throw new CloudError('USER_NOT_FOUND', '用户不存在。', 404);
+  }
+  return `${IMPORT_TOKEN_PREFIX}${userId}_${randomToken(32)}`;
+}
+
+export function importTokenUserId(token) {
+  const match = IMPORT_TOKEN_RE.exec(String(token || ''));
+  return match ? match[1] : '';
 }
 
 export function constantTimeEqual(a, b) {

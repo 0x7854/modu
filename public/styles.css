@@ -3982,3 +3982,8 @@ kbd {
     font-size: 19px;
   }
 }
+
+/* Cloud-only imports open through the existing safe external-link handler. */
+a.cloud-online-name { color: inherit; text-decoration: none; cursor: pointer; }
+a.cloud-online-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+a.cloud-online-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

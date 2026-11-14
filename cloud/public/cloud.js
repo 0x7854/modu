@@ -49,6 +49,21 @@ const els = {
   libraryDialogSubmit: $('#library-dialog-submit'),
   libraryDialogCancel: $('#library-dialog-cancel'),
   libraryDialogClose: $('#library-dialog-close'),
+  importDoc: $('#import-doc'),
+  importFile: $('#import-file'),
+  shortcutSettings: $('#shortcut-settings'),
+  shortcutDialog: $('#shortcut-dialog'),
+  shortcutClose: $('#shortcut-close'),
+  shortcutUrl: $('#shortcut-url'),
+  shortcutCopyUrl: $('#shortcut-copy-url'),
+  shortcutTokenStatus: $('#shortcut-token-status'),
+  shortcutTokenSecret: $('#shortcut-token-secret'),
+  shortcutTokenValue: $('#shortcut-token-value'),
+  shortcutCopyToken: $('#shortcut-copy-token'),
+  shortcutTokenHint: $('#shortcut-token-hint'),
+  shortcutGenerate: $('#shortcut-generate'),
+  shortcutRevoke: $('#shortcut-revoke'),
+  shortcutError: $('#shortcut-error'),
   userLine: $('#user-line'),
   footerUser: $('#footer-user'),
   footerStatus: $('#footer-status'),
@@ -167,6 +182,12 @@ const state = {
   libraryView: { kind: LIBRARY_VIEW_ALL, folderId: '' },
   libraryDialog: null,
   libraryDialogBusy: false,
+  importBusy: false,
+  importPending: null,
+  maxDocBytes: 2 * 1024 * 1024,
+  shortcutBusy: false,
+  shortcutConfigured: false,
+  shortcutToken: '',
   docDrag: null,
   docDragBusy: false,
   docDragSuppressClickUntil: 0,
@@ -1375,6 +1396,7 @@ function applyBootstrap(payload) {
   state.csrfToken = payload.csrfToken || '';
   state.documents = payload.documents;
   state.documentSignature = documentSignature(state.documents);
+  if (Number(payload.maxDocBytes) > 0) state.maxDocBytes = Number(payload.maxDocBytes);
   if (payload.library) {
     setLibrary(payload.library, { loaded: true });
     state.libraryError = '';
@@ -1546,6 +1568,8 @@ async function logout() {
   state.csrfToken = '';
   state.currentDoc = null;
   state.currentMarkdown = '';
+  state.importPending = null;
+  closeShortcutDialog({ restoreFocus: false });
   safeSessionClear();
   els.doc.innerHTML = '';
   els.docList.replaceChildren();
@@ -1654,6 +1678,7 @@ function syncLibraryActionButtons() {
   for (const button of [els.folderRename, els.folderMove, els.folderDelete]) {
     button.disabled = disabled;
   }
+  syncImportAndShortcutButtons();
 }
 
 function renderFolderTree() {
@@ -1895,6 +1920,263 @@ async function refreshLibrary({ quiet = false } = {}) {
       renderLibraryState();
       renderDocList();
     }
+  }
+}
+
+/* ------------------------------------------------- import / shortcut */
+
+const IMPORT_BUTTON_LABEL = '导入 Markdown';
+
+function isShortcutDialogOpen() {
+  return Boolean(els.shortcutDialog && !els.shortcutDialog.hidden);
+}
+
+function setShortcutError(message) {
+  els.shortcutError.hidden = !message;
+  els.shortcutError.textContent = message || '';
+}
+
+function syncImportAndShortcutButtons() {
+  const offline = !state.authenticated || !state.online;
+  els.importDoc.disabled = state.importBusy || offline;
+  els.importDoc.textContent = state.importBusy ? '正在导入…' : IMPORT_BUTTON_LABEL;
+  els.shortcutSettings.disabled = state.shortcutBusy || offline;
+  els.shortcutGenerate.disabled = state.shortcutBusy || offline;
+  els.shortcutRevoke.disabled = state.shortcutBusy || offline || !state.shortcutConfigured;
+}
+
+function randomImportRequestId() {
+  const bytes = new Uint8Array(16);
+  try {
+    window.crypto.getRandomValues(bytes);
+  } catch {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+function importFileFingerprint(file) {
+  return [file.name, file.size, file.lastModified || 0].join(':');
+}
+
+async function importMarkdownFile(file) {
+  if (!file || state.importBusy || !state.authenticated) return;
+  if (!state.online) {
+    showToast('当前离线，无法导入。恢复网络后重试。', 'error');
+    return;
+  }
+  if (!/\.(?:md|markdown)$/i.test(file.name || '')) {
+    showToast('只能导入 .md 或 .markdown 文件。', 'error');
+    return;
+  }
+  const maxBytes = Number(state.maxDocBytes) || 2 * 1024 * 1024;
+  if (Number.isFinite(file.size) && file.size > maxBytes) {
+    showToast(`文件超过 ${(maxBytes / 1024 / 1024).toFixed(0)} MB 限制。`, 'error');
+    return;
+  }
+
+  const authGeneration = state.authGeneration;
+  const fingerprint = importFileFingerprint(file);
+  // Reuse the requestId after a network/timeout failure so a retry cannot create
+  // a second document. A deliberately selected different file gets a new id.
+  const requestId = state.importPending?.fingerprint === fingerprint
+    ? state.importPending.requestId
+    : randomImportRequestId();
+  state.importPending = { fingerprint, requestId };
+  state.importBusy = true;
+  syncImportAndShortcutButtons();
+
+  try {
+    const markdown = await file.text();
+    showToast(`正在导入 ${file.name}…`, 'info');
+    const payload = await api('/api/import/documents', {
+      method: 'POST',
+      csrf: true,
+      timeoutMs: 60_000,
+      body: { name: file.name, markdown, requestId },
+    });
+    if (authGeneration !== state.authGeneration || !state.authenticated) return;
+    if (!payload?.doc?.id) {
+      throw new ApiError('导入响应不完整。', 'BAD_RESPONSE', 500);
+    }
+    state.importPending = null;
+    await loadDocuments({ autoOpen: false });
+    await openDocument(payload.doc.id, { force: true, silent: true });
+    showToast(`已导入 ${payload.doc.name}`, 'success');
+  } catch (error) {
+    // Keep the id only for failures where the server may have committed but the
+    // response was lost. A validation error should allow a corrected file to
+    // reuse the same requestId without a false conflict.
+    const retryable = error instanceof ApiError
+      && (error.status === 0 || error.status >= 500);
+    if (!retryable) state.importPending = null;
+    showToast(error.message || '导入失败，请检查网络后重试。', 'error');
+  } finally {
+    state.importBusy = false;
+    syncImportAndShortcutButtons();
+  }
+}
+
+function renderShortcutStatus(payload) {
+  const configured = Boolean(payload?.configured);
+  const valid = configured && Boolean(payload?.valid);
+  state.shortcutConfigured = configured;
+  if (!configured) {
+    els.shortcutTokenStatus.textContent = '尚未生成';
+  } else if (valid) {
+    const rotated = formatTime(payload?.tokenInfo?.rotatedAt);
+    els.shortcutTokenStatus.textContent = rotated ? `已启用 · ${rotated}` : '已启用';
+  } else {
+    els.shortcutTokenStatus.textContent = '已失效，请重新生成';
+  }
+  els.shortcutGenerate.textContent = configured ? '轮换令牌' : '生成令牌';
+  els.shortcutRevoke.hidden = !configured;
+  els.shortcutTokenHint.textContent = configured && !valid
+    ? '密码重置或账户状态变化后，旧令牌会立即失效；重新生成即可。'
+    : '令牌只用于创建新文档，不能读取现有文档，也不要在聊天或公开页面中分享。';
+  syncImportAndShortcutButtons();
+}
+
+async function refreshShortcutStatus() {
+  const authGeneration = state.authGeneration;
+  state.shortcutBusy = true;
+  setShortcutError('');
+  syncImportAndShortcutButtons();
+  try {
+    const payload = await api('/api/import/token');
+    if (!isShortcutDialogOpen()
+      || authGeneration !== state.authGeneration
+      || !state.authenticated) return;
+    renderShortcutStatus(payload);
+  } catch (error) {
+    if (!isShortcutDialogOpen()
+      || authGeneration !== state.authGeneration
+      || !state.authenticated) return;
+    els.shortcutTokenStatus.textContent = '无法读取状态';
+    setShortcutError(error.message || '无法读取仅导入令牌状态。');
+  } finally {
+    state.shortcutBusy = false;
+    syncImportAndShortcutButtons();
+  }
+}
+
+function openShortcutDialog() {
+  if (!state.authenticated || !state.online) return;
+  state.shortcutToken = '';
+  state.shortcutConfigured = false;
+  els.shortcutTokenSecret.hidden = true;
+  els.shortcutTokenValue.value = '';
+  els.shortcutUrl.value = location.origin;
+  els.shortcutTokenStatus.textContent = '正在读取…';
+  els.shortcutGenerate.textContent = '生成令牌';
+  els.shortcutRevoke.hidden = true;
+  els.shortcutRevoke.disabled = true;
+  setShortcutError('');
+  els.shortcutDialog.hidden = false;
+  syncEdgeHitRegion();
+  syncImportAndShortcutButtons();
+  refreshShortcutStatus();
+  requestAnimationFrame(() => els.shortcutClose.focus({ preventScroll: true }));
+}
+
+function closeShortcutDialog({ restoreFocus = true } = {}) {
+  if (!isShortcutDialogOpen()) return;
+  els.shortcutDialog.hidden = true;
+  state.shortcutToken = '';
+  els.shortcutTokenValue.value = '';
+  els.shortcutTokenSecret.hidden = true;
+  setShortcutError('');
+  syncEdgeHitRegion();
+  if (restoreFocus && state.authenticated) {
+    els.shortcutSettings.focus({ preventScroll: true });
+  }
+}
+
+async function generateShortcutToken() {
+  if (state.shortcutBusy || !state.authenticated) return;
+  const authGeneration = state.authGeneration;
+  state.shortcutBusy = true;
+  setShortcutError('');
+  syncImportAndShortcutButtons();
+  try {
+    const payload = await api('/api/import/token', {
+      method: 'POST',
+      csrf: true,
+      body: {},
+    });
+    if (authGeneration !== state.authGeneration || !state.authenticated) return;
+    if (!payload?.token) {
+      throw new ApiError('令牌响应不完整。', 'BAD_RESPONSE', 500);
+    }
+    state.shortcutToken = payload.token;
+    state.shortcutConfigured = true;
+    els.shortcutTokenValue.value = payload.token;
+    els.shortcutTokenSecret.hidden = false;
+    els.shortcutTokenStatus.textContent = '已生成，请立即复制';
+    els.shortcutGenerate.textContent = '轮换令牌';
+    els.shortcutRevoke.hidden = false;
+    els.shortcutTokenHint.textContent = '这个令牌只显示一次。关闭对话框后无法再次查看；请立即粘贴到快捷指令。';
+    showToast('已生成仅导入令牌，请立即复制到快捷指令。', 'success');
+    els.shortcutTokenValue.focus({ preventScroll: true });
+    els.shortcutTokenValue.select();
+  } catch (error) {
+    setShortcutError(error.message || '生成令牌失败，请稍后重试。');
+  } finally {
+    state.shortcutBusy = false;
+    syncImportAndShortcutButtons();
+  }
+}
+
+async function revokeShortcutToken() {
+  if (state.shortcutBusy || !state.authenticated) return;
+  const authGeneration = state.authGeneration;
+  state.shortcutBusy = true;
+  setShortcutError('');
+  syncImportAndShortcutButtons();
+  try {
+    await api('/api/import/token', {
+      method: 'DELETE',
+      csrf: true,
+      body: {},
+    });
+    if (authGeneration !== state.authGeneration || !state.authenticated) return;
+    state.shortcutToken = '';
+    state.shortcutConfigured = false;
+    els.shortcutTokenValue.value = '';
+    els.shortcutTokenSecret.hidden = true;
+    els.shortcutTokenStatus.textContent = '尚未生成';
+    els.shortcutGenerate.textContent = '生成令牌';
+    els.shortcutRevoke.hidden = true;
+    els.shortcutTokenHint.textContent = '令牌只用于创建新文档，不能读取现有文档，也不要在聊天或公开页面中分享。';
+    showToast('已撤销仅导入令牌，快捷指令将无法继续导入。', 'success');
+  } catch (error) {
+    setShortcutError(error.message || '撤销令牌失败，请稍后重试。');
+  } finally {
+    state.shortcutBusy = false;
+    syncImportAndShortcutButtons();
+  }
+}
+
+async function copyShortcutValue(value, input, label) {
+  if (!value) {
+    showToast('没有可复制的内容。', 'info');
+    return;
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      input.focus({ preventScroll: true });
+      input.select();
+      document.execCommand('copy');
+    }
+    showToast(`${label}已复制。`, 'success');
+  } catch {
+    input.focus({ preventScroll: true });
+    input.select();
+    showToast('无法自动复制，请手动选择文本复制。', 'error');
   }
 }
 
@@ -2540,6 +2822,9 @@ async function moveDocumentByDrop(docId, folderId, baseRevision, docName) {
 
 function resetLibraryState() {
   cancelDocumentDrag();
+  closeShortcutDialog({ restoreFocus: false });
+  state.importBusy = false;
+  state.importPending = null;
   state.docDragBusy = false;
   state.docDragSuppressClickUntil = 0;
   closeLibraryDialog({ restoreFocus: false });
@@ -2569,6 +2854,7 @@ async function loadDocuments({ autoOpen = true } = {}) {
   // repopulate the next screen with the previous account's documents.
   if (authGeneration !== state.authGeneration || !state.authenticated) return state.documents;
   const documents = Array.isArray(payload.documents) ? payload.documents : [];
+  if (Number(payload.maxDocBytes) > 0) state.maxDocBytes = Number(payload.maxDocBytes);
   const nextSignature = documentSignature(documents);
   const changed = nextSignature !== state.documentSignature;
   state.documents = documents;
@@ -2845,6 +3131,7 @@ function canUseEdgeGesture() {
     && !state.libraryOpen
     && state.view !== 'library'
     && !isLibraryDialogOpen()
+    && !isShortcutDialogOpen()
     && isNarrowLayout()
     && hasTouchInput()
     && !els.shell.hidden;
@@ -3053,6 +3340,33 @@ function bindEvents() {
   els.folderDelete.addEventListener('click', () => {
     if (currentFolder()) openLibraryDialog('delete-folder', { folderId: currentFolder().id });
   });
+  els.importDoc.addEventListener('click', () => {
+    if (state.importBusy || !state.authenticated) return;
+    els.importFile.click();
+  });
+  els.importFile.addEventListener('change', async () => {
+    const file = els.importFile.files?.[0] || null;
+    // Clear immediately so selecting the same file again still fires change.
+    els.importFile.value = '';
+    if (file) await importMarkdownFile(file);
+  });
+  els.shortcutSettings.addEventListener('click', openShortcutDialog);
+  els.shortcutClose.addEventListener('click', () => closeShortcutDialog());
+  els.shortcutDialog.addEventListener('click', (event) => {
+    if (event.target === els.shortcutDialog) closeShortcutDialog();
+  });
+  els.shortcutGenerate.addEventListener('click', generateShortcutToken);
+  els.shortcutRevoke.addEventListener('click', revokeShortcutToken);
+  els.shortcutCopyUrl.addEventListener('click', () => {
+    copyShortcutValue(els.shortcutUrl.value, els.shortcutUrl, '服务 URL');
+  });
+  els.shortcutCopyToken.addEventListener('click', () => {
+    copyShortcutValue(
+      state.shortcutToken || els.shortcutTokenValue.value,
+      els.shortcutTokenValue,
+      '仅导入令牌',
+    );
+  });
   els.libraryStateRetry.addEventListener('click', () => refreshLibrary());
   els.libraryForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -3069,14 +3383,18 @@ function bindEvents() {
       cancelDocumentDrag();
       return;
     }
-    if (!isLibraryDialogOpen()) return;
+    const openDialog = isLibraryDialogOpen()
+      ? els.libraryDialog
+      : (isShortcutDialogOpen() ? els.shortcutDialog : null);
+    if (!openDialog) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      closeLibraryDialog();
+      if (openDialog === els.libraryDialog) closeLibraryDialog();
+      else closeShortcutDialog();
       return;
     }
     if (event.key !== 'Tab') return;
-    const focusable = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])', els.libraryDialog)
+    const focusable = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])', openDialog)
       .filter((node) => node.offsetParent !== null);
     if (!focusable.length) return;
     const first = focusable[0];

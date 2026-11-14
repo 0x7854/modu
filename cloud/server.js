@@ -30,8 +30,20 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_MAX_DOC_BYTES = 2 * 1024 * 1024;
 const MAX_JSON_BYTES = 32 * 1024;
 const LOGIN_BODY_BYTES = 8 * 1024;
+const IMPORT_BODY_ENVELOPE_BYTES = 64 * 1024;
+const MAX_IMPORT_BODY_CAP = 16 * 1024 * 1024;
 const MAX_SESSIONS = 2000;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// The only public shortcut path. Never turn this into a directory server: the
+// app serves exactly this fixed, secret-free file (root owns its contents).
+const SHORTCUT_ROUTES = new Map([
+  ['/shortcuts/Open-in-Modu.shortcut', {
+    file: 'shortcuts/Open-in-Modu.shortcut',
+    type: 'application/x-apple-shortcut',
+    filename: 'Open-in-Modu.shortcut',
+  }],
+]);
 
 const STATIC_FILES = new Map([
   ['/cloud.css', { file: 'cloud.css', type: 'text/css; charset=utf-8', cache: 'public, max-age=300' }],
@@ -277,6 +289,25 @@ export async function createCloudServer(options = {}) {
     limit: Number(options.uploadMaxRequests) > 0 ? Number(options.uploadMaxRequests) : 60,
     windowMs: 60_000,
   });
+  const importLimiter = new RateLimiter({
+    limit: Number(options.importMaxRequests) > 0 ? Number(options.importMaxRequests) : 60,
+    windowMs: 60_000,
+  });
+  const importTokenFailureLimiter = new RateLimiter({
+    limit: Number(options.importTokenMaxFailures) > 0
+      ? Number(options.importTokenMaxFailures)
+      : 10,
+    windowMs: Number(options.importTokenWindowMs) > 0
+      ? Number(options.importTokenWindowMs)
+      : 15 * 60 * 1000,
+  });
+  // A 2 MiB UTF-8 document can expand up to 6x when JSON.stringify escapes
+  // control characters. Give that case a bounded envelope, then enforce the
+  // real markdown size again in the store.
+  const maxImportBodyBytes = Math.min(
+    MAX_IMPORT_BODY_CAP,
+    maxDocBytes * 6 + IMPORT_BODY_ENVELOPE_BYTES,
+  );
 
   const store = await new CloudStore(dataDir, { maxDocBytes }).init();
   const indexTemplate = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8');
@@ -364,6 +395,91 @@ export async function createCloudServer(options = {}) {
         headers: { 'Retry-After': String(result.retryAfter) },
       });
     }
+  }
+
+  /**
+   * Import accepts exactly two credentials:
+   * - the web session cookie, which must also carry the page CSRF token; or
+   * - a dedicated import-only Bearer token that can create a new document and
+   *   nothing else.
+   * The sync token, password, session id and import token are never
+   * interchangeable.
+   */
+  async function authenticateImport(req) {
+    const bearer = parseBearer(req);
+    if (!bearer) {
+      const session = await authenticate(req);
+      requireCsrf(req, session);
+      return session.user;
+    }
+    const ip = getClientIp(req, { trustProxy });
+    const precheck = importTokenFailureLimiter.peek(ip);
+    if (!precheck.allowed) {
+      throw new CloudError('RATE_LIMITED', '导入令牌验证失败次数过多，请稍后再试。', 429, {
+        headers: { 'Retry-After': String(precheck.retryAfter) },
+      });
+    }
+    const user = await store.verifyImportToken(bearer);
+    if (!user) {
+      importTokenFailureLimiter.record(ip);
+      throw new CloudError('IMPORT_TOKEN_INVALID', '仅导入令牌无效或已失效。', 401);
+    }
+    importTokenFailureLimiter.clear(ip);
+    return user;
+  }
+
+  async function handleImportDocument(req, res) {
+    if (req.method !== 'POST') methodNotAllowed(res, 'POST');
+    const user = await authenticateImport(req);
+    const rate = importLimiter.hit(user.id);
+    if (!rate.allowed) {
+      throw new CloudError('RATE_LIMITED', '导入过于频繁，请稍后再试。', 429, {
+        headers: { 'Retry-After': String(rate.retryAfter) },
+      });
+    }
+    const body = await readBody(req, maxImportBodyBytes);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new CloudError('INVALID_JSON', '请求内容不是有效的对象。', 400);
+    }
+    const result = await store.importDocument(user.id, {
+      name: body.name,
+      markdown: body.markdown,
+      requestId: body.requestId,
+    });
+    sendJson(res, result.replayed ? 200 : 201, {
+      ok: true,
+      doc: result.doc,
+      url: `/#doc-${result.doc.id}`,
+      replayed: result.replayed,
+    });
+  }
+
+  async function handleImportToken(req, res) {
+    const session = await authenticate(req);
+    if (req.method === 'GET') {
+      const info = await store.getImportTokenInfo(session.user.id);
+      sendJson(res, 200, { ok: true, ...info });
+      return;
+    }
+    if (req.method === 'POST') {
+      requireCsrf(req, session);
+      const issued = await store.issueImportToken(session.user.id);
+      sendJson(res, 200, {
+        ok: true,
+        token: issued.token,
+        configured: issued.configured,
+        valid: issued.valid,
+        tokenInfo: issued.tokenInfo,
+      });
+      return;
+    }
+    if (req.method === 'DELETE') {
+      requireCsrf(req, session);
+      const info = await store.revokeImportToken(session.user.id);
+      sendJson(res, 200, { ok: true, ...info });
+      return;
+    }
+    methodNotAllowed(res, 'GET, POST, DELETE');
   }
 
   async function handleLogin(req, res) {
@@ -528,6 +644,16 @@ export async function createCloudServer(options = {}) {
     if (pathname === '/api/login') {
       if (req.method !== 'POST') methodNotAllowed(res, 'POST');
       await handleLogin(req, res);
+      return;
+    }
+
+    if (pathname === '/api/import/documents') {
+      await handleImportDocument(req, res);
+      return;
+    }
+
+    if (pathname === '/api/import/token') {
+      await handleImportToken(req, res);
       return;
     }
 
@@ -704,6 +830,31 @@ export async function createCloudServer(options = {}) {
         return;
       }
 
+      if (SHORTCUT_ROUTES.has(pathname)) {
+        if (req.method !== 'GET') methodNotAllowed(res, 'GET');
+        const meta = SHORTCUT_ROUTES.get(pathname);
+        let body;
+        try {
+          body = await fs.promises.readFile(path.join(publicDir, meta.file));
+        } catch (error) {
+          if (error?.code === 'ENOENT') {
+            sendText(res, 404, '未找到快捷指令文件。');
+            return;
+          }
+          throw error;
+        }
+        res.writeHead(200, {
+          ...securityHeaders({ secure }),
+          'Content-Type': meta.type,
+          'Content-Length': body.length,
+          'Cache-Control': 'no-store',
+          'Content-Disposition': `attachment; filename="${meta.filename}"; filename*=UTF-8''${encodeURIComponent("用墨读打开.shortcut")}`,
+          'Cross-Origin-Resource-Policy': 'same-origin',
+        });
+        res.end(body);
+        return;
+      }
+
       if (STATIC_FILES.has(pathname)) {
         if (req.method !== 'GET') methodNotAllowed(res, 'GET');
         const asset = staticContents.get(pathname);
@@ -774,6 +925,7 @@ export async function createCloudServer(options = {}) {
     dataDir,
     publicDir,
     maxDocBytes,
+    maxImportBodyBytes,
     pollMs,
     trustProxy,
     publicOrigin: publicOrigin || null,

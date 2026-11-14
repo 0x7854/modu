@@ -153,6 +153,12 @@
         </div>
         <p class="library-note">只有 Mac 上主动加入文库的 Markdown 或单文件 HTML 才会出现在这里。文件夹只整理云端文库，不移动 Mac 上的原文件。</p>
 
+        <div class="library-tools" role="group" aria-label="导入与快捷指令">
+          <button class="library-mini-button" id="import-doc" type="button">导入 Markdown</button>
+          <button class="library-mini-button" id="shortcut-settings" type="button">快捷指令</button>
+          <input id="import-file" type="file" accept=".md,.markdown,text/markdown" hidden>
+        </div>
+
         <section class="library-browse" aria-labelledby="folder-browse-title">
           <div class="library-browse-head">
             <span id="folder-browse-title">文件夹</span>
@@ -298,6 +304,71 @@
         <button class="primary-button dialog-submit" id="library-dialog-submit" type="submit">保存</button>
       </div>
     </form>
+  </div>
+
+  <div class="dialog-layer" id="shortcut-dialog" hidden>
+    <div class="shortcut-dialog" id="shortcut-panel" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">SHORTCUT · IMPORT ONLY</p>
+          <h2 id="shortcut-title">苹果快捷指令</h2>
+        </div>
+        <button class="icon-button dialog-close" id="shortcut-close" type="button" aria-label="关闭快捷指令设置">
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+
+      <p class="dialog-copy">
+        用系统分享把 Markdown 从“文件”或 Safari 导入云端文库。快捷指令使用一个只能新建文档的专用令牌，
+        不能读取、整理或覆盖你已有的任何文档。
+      </p>
+
+      <a class="primary-button shortcut-download" id="shortcut-download" href="/shortcuts/Open-in-Modu.shortcut" download="用墨读打开.shortcut">
+        下载通用快捷指令
+      </a>
+      <p class="shortcut-hint">添加时按提示填写下面的服务网址和仅导入令牌；以后无需重复设置。</p>
+
+      <div class="dialog-field">
+        <label for="shortcut-url">服务 URL</label>
+        <div class="shortcut-copy-row">
+          <input id="shortcut-url" type="text" readonly autocomplete="off" spellcheck="false">
+          <button class="library-mini-button" id="shortcut-copy-url" type="button">复制</button>
+        </div>
+      </div>
+
+      <div class="shortcut-token" id="shortcut-token">
+        <div class="shortcut-token-head">
+          <span>仅导入令牌</span>
+          <span class="shortcut-token-state" id="shortcut-token-status">正在读取…</span>
+        </div>
+        <div class="shortcut-token-secret" id="shortcut-token-secret" hidden>
+          <label for="shortcut-token-value">新令牌（只显示这一次）</label>
+          <div class="shortcut-copy-row">
+            <input id="shortcut-token-value" type="text" readonly autocomplete="off" spellcheck="false">
+            <button class="library-mini-button" id="shortcut-copy-token" type="button">复制</button>
+          </div>
+          <small>关闭本对话框后无法再次查看；请立即粘贴到快捷指令。忘记时只能重新生成。</small>
+        </div>
+        <p class="shortcut-hint" id="shortcut-token-hint">令牌只用于创建新文档，不能读取现有文档，也不要在聊天或公开页面中分享。</p>
+        <div class="shortcut-actions">
+          <button class="primary-button" id="shortcut-generate" type="button">生成令牌</button>
+          <button class="text-button" id="shortcut-revoke" type="button" hidden>撤销令牌</button>
+        </div>
+        <p class="dialog-error" id="shortcut-error" role="alert" hidden></p>
+      </div>
+
+      <div class="shortcut-steps">
+        <p class="eyebrow">HOW IT WORKS</p>
+        <ol>
+          <li>先生成并复制仅导入令牌，再下载快捷指令。</li>
+          <li>添加时填写服务网址和仅导入令牌。</li>
+          <li>在“文件”里分享一个 <code>.md</code> / <code>.markdown</code> 文件，选择这个快捷指令。</li>
+        </ol>
+        <p class="shortcut-hint">
+          首次在 Safari 中打开你的服务地址可能需要先登录网页；快捷指令本身不会使用你的密码或 Mac 同步令牌。
+        </p>
+      </div>
+    </div>
   </div>
 
   <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="false"></div>
