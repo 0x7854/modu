@@ -550,7 +550,7 @@ test(`document switch ${browserKind}: a timed-out read clears the overlay and ke
   }
 });
 
-test(`service worker ${browserKind}: r16 reuses unchanged r6 vendor cache and never caches API`, {
+test(`service worker ${browserKind}: r17 reuses unchanged r6 vendor cache and never caches API`, {
   skip: canRun ? false : 'No Playwright browser available',
   timeout: 60000,
 }, async () => {
@@ -578,15 +578,15 @@ test(`service worker ${browserKind}: r16 reuses unchanged r6 vendor cache and ne
     await page.locator('#login-submit').click();
     await page.locator('#cloud-shell').waitFor({ state: 'visible', timeout: 15000 });
     await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 });
-    await page.waitForFunction(async () => (await caches.keys()).includes('modu-cloud-v1.3.0-r16-shell'), null, {
+    await page.waitForFunction(async () => (await caches.keys()).includes('modu-cloud-v1.3.0-r17-shell'), null, {
       timeout: 20000,
     });
 
-    await page.waitForFunction(() => new URL(location.href).searchParams.get('modu-shell') === 'modu-cloud-v1.3.0-r16');
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('modu-shell') === 'modu-cloud-v1.3.0-r17');
     await page.locator('#cloud-shell').waitFor({state: 'visible'});
     const audit = await page.evaluate(async () => {
       const keys = await caches.keys();
-      const cache = await caches.open('modu-cloud-v1.3.0-r16-shell');
+      const cache = await caches.open('modu-cloud-v1.3.0-r17-shell');
       const paths = [];
       const vendorBodies = {};
       for (const request of await cache.keys()) {
@@ -599,7 +599,7 @@ test(`service worker ${browserKind}: r16 reuses unchanged r6 vendor cache and ne
       return { keys, paths, vendorBodies };
     });
 
-    assert.ok(audit.keys.includes('modu-cloud-v1.3.0-r16-shell'));
+    assert.ok(audit.keys.includes('modu-cloud-v1.3.0-r17-shell'));
     for (const required of ['/', '/cloud.css', '/cloud.js', '/vendor/markdown-it.min.js', '/vendor/purify.min.js']) {
       assert.ok(audit.paths.includes(required), `r6 shell missing ${required}`);
     }

@@ -2006,8 +2006,10 @@ async function importMarkdownFile(file) {
     showToast('当前离线，无法导入。恢复网络后重试。', 'error');
     return;
   }
-  if (!/\.(?:md|markdown)$/i.test(file.name || '')) {
-    showToast('只能导入 .md 或 .markdown 文件。', 'error');
+  const importName = String(file.name || '').trim();
+  const extension = /\.[^./\\]*$/.exec(importName)?.[0] || '';
+  if (!importName || (extension && !/^\.(?:md|markdown|txt)$/i.test(extension))) {
+    showToast('请选择 Markdown 或纯文本文件，不支持此文件后缀。', 'error');
     return;
   }
   const maxBytes = Number(state.maxDocBytes) || 2 * 1024 * 1024;

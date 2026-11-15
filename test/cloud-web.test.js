@@ -275,11 +275,11 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
 
     const beforeCount = await mobilePage.locator('#doc-list [data-doc-id]').count();
     await mobilePage.locator('#import-file').setInputFiles({
-      name: 'unsupported.txt',
+      name: 'unsupported.pdf',
       mimeType: 'text/plain',
       buffer: Buffer.from('not markdown'),
     });
-    await mobilePage.getByText('只能导入 .md 或 .markdown 文件。').waitFor({ timeout: 5000 });
+    await mobilePage.getByText('请选择 Markdown 或纯文本文件，不支持此文件后缀。').waitFor({ timeout: 5000 });
     assert.equal(await mobilePage.locator('#doc-list [data-doc-id]').count(), beforeCount);
 
     await mobilePage.locator('#import-file').setInputFiles({
@@ -315,6 +315,20 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
       return payload.documents.filter((doc) => doc.name === '中文 同名.md').length;
     });
     assert.equal(sameNameCount, 2);
+
+    // Generic iOS text shares may keep no extension or acquire .txt.
+    for (const name of ['分享文件', '分享文件.txt', '分享文件.md.txt']) {
+      await mobilePage.locator('#library-toggle').click();
+      await mobilePage.locator('#import-file').setInputFiles({
+        name, mimeType: 'text/plain', buffer: Buffer.from(`# 分享文本\n\n正文保留 ${name}`),
+      });
+      await mobilePage.getByText(`正文保留 ${name}`, {exact: true}).waitFor();
+      const saved = await mobilePage.evaluate(async () =>
+        (await (await fetch('/api/documents/' + location.hash.slice(5))).json()).doc);
+      assert.equal(saved.name, '分享文件.md');
+      assert.equal(saved.markdown, `# 分享文本\n\n正文保留 ${name}`);
+    }
+
 
     // A lost network request must surface an error and must not leave the import
     // button stuck in its loading state.

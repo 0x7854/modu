@@ -582,19 +582,28 @@ export class CloudStore {
     if (typeof name !== 'string') {
       throw new CloudError('INVALID_NAME', '文档名无效。', 400);
     }
-    const docName = name.trim();
+    let docName = name.trim();
     if (
       !docName
+      || docName === '.' || docName === '..'
       || docName.length > 200
       || /[/\\\u0000-\u001f\u007f]/.test(docName)
     ) {
       throw new CloudError('INVALID_NAME', '文档名无效。', 400);
     }
-    if (!IMPORT_EXTENSION_RE.test(docName)) {
-      throw new CloudError('UNSUPPORTED_TYPE', '导入只接收 .md / .markdown 文件。', 415);
+    // Share sheets may supply a basename or a plain-text filename for MD.
+    // Normalize only these textual names; never overwrite an existing file.
+    if (!IMPORT_EXTENSION_RE.test(docName) && !path.extname(docName)) docName += '.md';
+    else if (/\.txt$/i.test(docName)) {
+      docName = docName.slice(0, -4);
+      if (!IMPORT_EXTENSION_RE.test(docName)) docName += '.md';
     }
-    if (typeof markdown !== 'string') {
-      throw new CloudError('INVALID_MARKDOWN', '缺少 Markdown 正文。', 400);
+    if (docName.length > 200) throw new CloudError('INVALID_NAME', '文档名过长。', 400);
+    if (!IMPORT_EXTENSION_RE.test(docName)) {
+      throw new CloudError('UNSUPPORTED_TYPE', '请选择 Markdown 或纯文本文件，不支持此文件后缀。', 415);
+    }
+    if (typeof markdown !== 'string' || markdown.includes('\u0000')) {
+      throw new CloudError('INVALID_MARKDOWN', '未读取到有效的纯文本正文。', 400);
     }
     if (Buffer.byteLength(markdown, 'utf8') > this.maxDocBytes) {
       throw new CloudError(

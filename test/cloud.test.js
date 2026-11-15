@@ -515,7 +515,7 @@ test('mobile import accepts cookie+CSRF or import-only bearer, and never widens 
   assert.equal(tooLargeBody.status, 413);
   assert.equal((await tooLargeBody.json()).error.code, 'BODY_TOO_LARGE');
 
-  const badType = await importFetch(issued.token, { name: 'note.txt', markdown: '# nope' });
+  const badType = await importFetch(issued.token, { name: 'note.pdf', markdown: '# nope' });
   assert.equal(badType.status, 415);
   const badName = await importFetch(issued.token, { name: '../escape.md', markdown: '# nope' });
   assert.equal(badName.status, 400);
@@ -742,4 +742,30 @@ test('shortcut download is one fixed public path with no caching and no director
     await closeServer(shortcutServer);
     await fsp.rm(tempPublic, { recursive: true, force: true });
   }
+});
+
+test('shared Markdown survives lost extensions and plain-text names without changing the body', async () => {
+  const account = await store.addUser('shared-text', 'share filename test password');
+  const auth = await session('shared-text', 'share filename test password');
+  const issued = await issueImportToken(auth);
+  const markdown = '# 阅读材料\n\n> 引用\n\n**重点** 与 [链接](https://example.com)\n';
+  for (const [name, expected] of [['AI___', 'AI___.md'], ['文本文稿.txt', '文本文稿.md'], ['原稿.md.txt', '原稿.md'], ['原稿.MD', '原稿.MD'], ['.md', '.md'], ['原稿.markdown', '原稿.markdown']]) {
+    const response = await importFetch(issued.token, {name, markdown});
+    assert.equal(response.status, 201, name);
+    const result = await response.json();
+    assert.equal(result.doc.name, expected);
+    assert.equal((await store.getDocument(account.user.id, result.doc.id)).markdown, markdown);
+  }
+  const requestId = '8'.repeat(32);
+  const first = await (await importFetch(issued.token, {name:'重试', markdown, requestId})).json();
+  const replay = await importFetch(issued.token, {name:'重试.md', markdown, requestId});
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).doc.id, first.doc.id);
+  for (const name of ['file.pdf', 'file.docx', 'page.html', 'image.png']) {
+    assert.equal((await importFetch(issued.token, {name, markdown})).status, 415, name);
+  }
+  for (const name of ['.', '..', 'a'.repeat(198)]) {
+    assert.equal((await importFetch(issued.token, {name, markdown})).status, 400, name);
+  }
+  assert.equal((await importFetch(issued.token, {name:'binary', markdown:'text\u0000binary'})).status,400);
 });
