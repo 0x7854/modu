@@ -36,6 +36,20 @@ class ShortcutFormatTest(unittest.TestCase):
     def test_generated_condition_references_upload_url(self):
         validate_condition(builder.build())
 
+    def test_native_opens_app_with_document_id_without_token(self):
+        workflow = builder.build(native=True)
+        validate_condition(workflow)
+        actions = workflow['WFWorkflowActions']
+        opener = next(a['WFWorkflowActionParameters']['WFInput']['Value'] for a in actions
+                      if a['WFWorkflowActionIdentifier'] == 'is.workflow.actions.openurl')
+        self.assertEqual(opener['string'], 'modu-reader://open?server=\ufffc&document=\ufffc')
+        referenced = {v['OutputUUID'] for v in opener['attachmentsByRange'].values()}
+        token_id = actions[1]['WFWorkflowActionParameters']['UUID']
+        self.assertNotIn(token_id, referenced)
+        doc_action = next(a['WFWorkflowActionParameters'] for a in actions
+                          if a['WFWorkflowActionParameters'].get('WFDictionaryKey') == 'doc.id')
+        self.assertIn(doc_action['UUID'], referenced)
+
     def test_rejects_original_blank_condition_encoding(self):
         workflow = builder.build()
         condition = workflow['WFWorkflowActions'][6]['WFWorkflowActionParameters']

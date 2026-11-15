@@ -13,7 +13,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
 
-def build(server='https://reader.example.com', token='CONFIGURE_IMPORT_TOKEN', name='用墨读打开'):
+def build(server='https://reader.example.com', token='CONFIGURE_IMPORT_TOKEN', name='用墨读打开', native=False):
     actions = []
     def uid(key):
         return str(uuid.uuid5(uuid.NAMESPACE_URL, 'https://github.com/0x7854/modu/shortcut/'+key)).upper()
@@ -62,7 +62,13 @@ def build(server='https://reader.example.com', token='CONFIGURE_IMPORT_TOKEN', n
     action('conditional', WFInput={'Type': 'Variable',
            'Variable': attachment(output('url','阅读地址'))}, WFCondition=100,
            GroupingIdentifier=group, WFControlFlowMode=0)
-    action('openurl', WFInput=text(output('server','服务网址'),output('url','阅读地址')))
+    if native:
+        action('getvalueforkey', 'document-id', WFInput=attachment(output('upload','上传结果')),
+               WFDictionaryKey='doc.id')
+        action('openurl', WFInput=text('modu-reader://open?server=', output('server','服务网址'),
+                                      '&document=', output('document-id','文档编号')))
+    else:
+        action('openurl', WFInput=text(output('server','服务网址'),output('url','阅读地址')))
     action('conditional', GroupingIdentifier=group, WFControlFlowMode=1)
     action('getvalueforkey','error',WFInput=attachment(output('upload','上传结果')),WFDictionaryKey='error.message')
     action('showresult',Text=text('导入未完成：',output('error','错误信息'),'\n请检查网址、仅导入凭证和文件格式。'))
@@ -83,13 +89,15 @@ def build(server='https://reader.example.com', token='CONFIGURE_IMPORT_TOKEN', n
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--sign',action='store_true')
+    parser.add_argument('--native', action='store_true', help='Open the installed iPad/iPhone app after upload')
     args=parser.parse_args()
     out=ROOT/'.build'/'shortcuts';out.mkdir(parents=True,exist_ok=True)
-    unsigned=out/'用墨读打开.shortcut'
-    unsigned.write_bytes(plistlib.dumps(build(),fmt=plistlib.FMT_BINARY,sort_keys=False))
+    name='用墨读 App 打开' if args.native else '用墨读打开'
+    unsigned=out/(name+'.shortcut')
+    unsigned.write_bytes(plistlib.dumps(build(name=name, native=args.native),fmt=plistlib.FMT_BINARY,sort_keys=False))
     print(unsigned)
     if args.sign:
-        signed=ROOT/'cloud'/'public'/'shortcuts'/'Open-in-Modu.shortcut'
+        signed=(out/'Open-in-Modu-App.shortcut') if args.native else ROOT/'cloud'/'public'/'shortcuts'/'Open-in-Modu.shortcut'
         signed.parent.mkdir(parents=True,exist_ok=True)
         subprocess.run(['shortcuts','sign','--mode','anyone','--input',str(unsigned),'--output',str(signed)],check=True)
         print(signed)
