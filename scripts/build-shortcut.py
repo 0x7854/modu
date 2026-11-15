@@ -57,7 +57,10 @@ def build(server='https://reader.example.com', token='CONFIGURE_IMPORT_TOKEN', n
             ('markdown',text(output('markdown','文本')))]))
     action('getvalueforkey','url', WFInput=attachment(output('upload','上传结果')),WFDictionaryKey='url')
     group=uid('result-condition')
-    action('conditional', WFInput=attachment(output('url','阅读地址')), WFCondition=100,
+    # Conditional uses a variable picker, not the bare attachment accepted by
+    # ordinary actions. Without this wrapper iOS imports a blank condition.
+    action('conditional', WFInput={'Type': 'Variable',
+           'Variable': attachment(output('url','阅读地址'))}, WFCondition=100,
            GroupingIdentifier=group, WFControlFlowMode=0)
     action('openurl', WFInput=text(output('server','服务网址'),output('url','阅读地址')))
     action('conditional', GroupingIdentifier=group, WFControlFlowMode=1)
