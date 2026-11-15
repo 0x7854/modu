@@ -340,6 +340,26 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
     await mobilePage.locator('#shortcut-token-secret').waitFor({ state: 'visible', timeout: 10000 });
     const firstToken = await mobilePage.locator('#shortcut-token-value').inputValue();
     assert.match(firstToken, /^modu_import_[a-f0-9]{24}_[A-Za-z0-9_-]{43}$/);
+    // iPad may render the attachment as a file preview instead of downloading.
+    // It must open separately and preserve both the reader and one-time token.
+    const readerUrl = mobilePage.url();
+    const downloadLink = mobilePage.locator('#shortcut-download');
+    assert.equal(await downloadLink.getAttribute('target'), '_blank');
+    assert.equal(await downloadLink.getAttribute('download'), null);
+    await mobile.route('**/shortcuts/Open-in-Modu.shortcut', route => route.fulfill({
+      contentType: 'text/html', body: '<h1>System file preview</h1>',
+    }));
+    const previewPromise = mobile.waitForEvent('page');
+    await downloadLink.click();
+    const preview = await previewPromise;
+    await preview.locator('h1').waitFor();
+    assert.equal(mobilePage.url(), readerUrl);
+    assert.equal(await mobilePage.locator('#shortcut-dialog').isVisible(), true);
+    assert.equal(await mobilePage.locator('#shortcut-token-value').inputValue(), firstToken);
+    assert.equal(await preview.evaluate(() => window.opener === null), true);
+    await preview.close();
+    await mobile.unroute('**/shortcuts/Open-in-Modu.shortcut');
+
     assert.match(await mobilePage.locator('#shortcut-token-hint').textContent(), /只显示一次|不能读取/);
     await mobilePage.locator('#shortcut-close').click();
     await mobilePage.locator('#shortcut-dialog').waitFor({ state: 'hidden' });
