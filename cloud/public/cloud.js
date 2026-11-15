@@ -263,6 +263,14 @@ function currentHistoryView() {
   return currentHistoryState()?.view || '';
 }
 
+function historyEntryHasBase(entry) {
+  // A library entry is itself the base. Reader/auth entries only claim one
+  // when this release wrote the marker, so a restored single-entry reader
+  // from an older launch can be repaired instead of silently trusting that a
+  // Back target still exists.
+  return Boolean(entry && (entry.view === 'library' || entry.base === true));
+}
+
 function libraryUrl() {
   return `${location.pathname}${location.search}`;
 }
@@ -279,7 +287,11 @@ function docIdFromHash() {
 function replaceAuthHistory({ keepUrl = false, libraryBehind = false } = {}) {
   state.view = 'auth';
   try {
-    const extra = libraryBehind ? { libraryBehind: true } : {};
+    // `base` is the durable evidence that a library entry exists directly
+    // behind this auth entry. `libraryBehind` alone is only a hint: older
+    // releases wrote it from a current reader state without proving the base
+    // was still in the back-forward list.
+    const extra = libraryBehind ? { libraryBehind: true, base: true } : {};
     history.replaceState(makeHistoryState('auth', extra), '', keepUrl ? location.href : libraryUrl());
   } catch {
     // History can be unavailable in unusual embedded contexts. The auth
@@ -291,7 +303,7 @@ function ensureLibraryHistory() {
   state.view = 'library';
   state.historyBaseCreated = true;
   try {
-    history.replaceState(makeHistoryState('library'), '', libraryUrl());
+    history.replaceState(makeHistoryState('library', { base: true }), '', libraryUrl());
   } catch {
     // Never block the library screen on a history failure.
   }
@@ -300,26 +312,37 @@ function ensureLibraryHistory() {
 
 function commitReaderHistory(docId) {
   if (!docId) return;
-  const view = currentHistoryView();
-  const next = makeHistoryState('reader', { docId });
+  const saved = currentHistoryState();
+  const view = saved?.view || '';
+  // Legacy entries without our base marker need one migration repair.
+  // A restored PWA entry can carry the reader state without
+  // the library entry, which used to send the first Back to an old page or out
+  // of the app. Repair once by replacing the orphaned entry with a library
+  // base and putting the reader on top; the marker prevents repeat growth.
+  const hasBase = historyEntryHasBase(saved);
+  const next = makeHistoryState('reader', { docId, base: true });
   try {
-    if (view === 'reader') {
+    if (view === 'reader' && hasBase) {
       // Switching documents reuses the one reader entry; Back still lands on
       // the library instead of growing one entry per document.
-      if (currentHistoryState()?.docId !== docId || location.hash !== readerUrl(docId)) {
+      if (saved?.docId !== docId || location.hash !== readerUrl(docId)) {
         history.replaceState(next, '', readerUrl(docId));
       }
     } else if (view === 'library') {
       history.pushState(next, '', readerUrl(docId));
-    } else if (currentHistoryState()?.libraryBehind === true && state.historyBaseCreated) {
+    } else if (view === 'auth'
+      && saved?.libraryBehind === true
+      && state.historyBaseCreated
+      && hasBase) {
       // Re-login after logout: the auth entry replaced a reader whose library
       // base is still directly behind it. Reuse that base instead of pushing
       // a second library/reader pair.
       history.replaceState(next, '', readerUrl(docId));
     } else {
-      // First meaningful library entry, then the reader on top of it. The
-      // library keeps the reader's doc id for a safe refresh/restore.
-      history.replaceState(makeHistoryState('library', { docId }), '', libraryUrl());
+      // First meaningful library entry, or a reader entry restored without a
+      // base. Keep the library entry on the current slot (so its doc id is
+      // available for a safe refresh/restore) and then push the reader.
+      history.replaceState(makeHistoryState('library', { docId, base: true }), '', libraryUrl());
       history.pushState(next, '', readerUrl(docId));
     }
   } catch {
@@ -394,7 +417,11 @@ function applyLibraryHistoryView({ focus = false } = {}) {
   // leaving Forward able to reveal it.
   if (state.currentDoc?.id) {
     try {
-      history.replaceState(makeHistoryState('library', { docId: state.currentDoc.id }), '', libraryUrl());
+      history.replaceState(
+        makeHistoryState('library', { docId: state.currentDoc.id, base: true }),
+        '',
+        libraryUrl(),
+      );
     } catch {
       // Ignore; the library view is still usable.
     }
@@ -433,7 +460,11 @@ function handlePopState(event) {
         libraryBehind: Boolean(visited?.view === 'reader' && state.historyBaseCreated),
       });
     } else {
-      replaceAuthHistory({ libraryBehind: visited?.libraryBehind === true });
+      replaceAuthHistory({
+        libraryBehind: state.historyBaseCreated
+          && visited?.libraryBehind === true
+          && visited?.base === true,
+      });
     }
     return;
   }
@@ -1334,12 +1365,20 @@ function showAuth(message = '', { keepUrl = false, libraryBehind } = {}) {
   // On a first visit the document hash still chooses the post-login document,
   // so it is preserved while the login screen is shown. Logout/expiry clears
   // the hash and labels the entry as auth so Back/Forward cannot rebuild it.
+  // A reader entry proves a base only when this release marked it. An auth
+  // entry can preserve a base across login failures, but legacy auth entries
+  // that merely claimed `libraryBehind` are repaired by the login path.
   const behind = libraryBehind === undefined
-    ? (priorState?.libraryBehind === true
-      || (state.historyBaseCreated && priorView === 'reader'))
+    ? (state.historyBaseCreated && (priorView === 'reader'
+      || (priorView === 'auth' && priorState?.base === true)))
     : Boolean(libraryBehind);
   replaceAuthHistory({ keepUrl, libraryBehind: behind });
-  window.setTimeout(() => els.loginUser.focus(), 30);
+  window.setTimeout(() => {
+    // Do not steal focus if the user has already started filling the form.
+    if (state.view === 'auth' && !els.auth.hidden && !els.auth.contains(document.activeElement)) {
+      els.loginUser.focus();
+    }
+  }, 30);
 }
 
 function showApp() {
@@ -3299,6 +3338,41 @@ function onAnyTouchStart(event) {
   if (state.edgeTouch && event.touches.length !== 1) resetEdgeGesture();
 }
 
+function isStandalonePwa() {
+  if (window.navigator.standalone === true) return true;
+  try {
+    return Boolean(window.matchMedia?.('(display-mode: standalone)')?.matches
+      || window.matchMedia?.('(display-mode: fullscreen)')?.matches);
+  } catch {
+    return false;
+  }
+}
+
+// In standalone mode the leading edge belongs to the app. During boot,
+// in the already-open library, or on wide screens there is no drawer strip
+// to claim it. Keep repeated edge swipes from falling through to old pages.
+// Do not touch Safari tabs, login, dialogs, controls, or multi-touch gestures.
+function shouldGuardPwaEdge(target) {
+  if (!isStandalonePwa()) return false;
+  if (!state.authenticated) return !els.boot.hidden && els.auth.hidden;
+  if (els.shell.hidden || isLibraryDialogOpen() || isShortcutDialogOpen()) return false;
+  if (!isReaderGestureTarget(target)) return false;
+  return !canUseEdgeGesture();
+}
+
+function pwaEdgeRight() {
+  if (!els.edgeNav) return EDGE_ZONE_PX;
+  const width = Number.parseFloat(getComputedStyle(els.edgeNav).width);
+  return Number.isFinite(width) && width > 0 ? width : EDGE_ZONE_PX;
+}
+
+function onPwaEdgeTouchStart(event) {
+  if (!shouldGuardPwaEdge(event.target) || event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  if (!touch || touch.clientX < 0 || touch.clientX > pwaEdgeRight()) return;
+  if (event.cancelable) event.preventDefault();
+}
+
 /* ------------------------------------------------------------- events */
 
 function bindEvents() {
@@ -3423,6 +3497,8 @@ function bindEvents() {
   if (els.edgeNav) {
     els.edgeNav.addEventListener('touchstart', onEdgeTouchStart, { passive: false });
   }
+  // Claim PWA edge touches when the regular drawer strip is not active.
+  window.addEventListener('touchstart', onPwaEdgeTouchStart, { passive: false, capture: true });
   window.addEventListener('touchstart', onAnyTouchStart, { passive: true });
   window.addEventListener('touchmove', onEdgeTouchMove, { passive: false });
   window.addEventListener('touchend', onEdgeTouchEnd, { passive: true });
@@ -3524,13 +3600,16 @@ async function registerServiceWorker() {
 async function initialize() {
   initTheme();
   bindEvents();
-  // A reload keeps the browser's history stack. If the current entry is a
-  // reader/library view, or an auth entry that replaced a reader, the library
-  // base is still behind it and can be reused after a later login.
-  const initialView = currentHistoryView();
-  state.historyBaseCreated = initialView === 'reader'
-    || initialView === 'library'
-    || (initialView === 'auth' && currentHistoryState()?.libraryBehind === true);
+  // A reload keeps the browser's history stack. Only trust a reader/auth
+  // entry when this release explicitly marked its library base;
+  // a restored PWA entry may have kept the view state without the Back target.
+  const initialState = currentHistoryState();
+  state.historyBaseCreated = historyEntryHasBase(initialState);
+  // cloud.js runs before deferred renderer dependencies so edge protection is
+  // already active on cold launches. Rendering waits for their script pass.
+  if ((!window.markdownit || !window.DOMPurify) && document.readyState !== 'complete') {
+    await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+  }
   try {
     markdown = createMarkdownRenderer();
   } catch (error) {

@@ -78,9 +78,10 @@
        runs, so the critical boot shell can paint first on a slow network. -->
   <link rel="stylesheet" href="/cloud.css" id="cloud-css" media="print">
   <noscript><link rel="stylesheet" href="/cloud.css"></noscript>
+  <!-- Install navigation handlers before waiting for Markdown dependencies. -->
+  <script src="/cloud.js" defer></script>
   <script src="/vendor/markdown-it.min.js" defer></script>
   <script src="/vendor/purify.min.js" defer></script>
-  <script src="/cloud.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#reader-scroll">跳到正文</a>
