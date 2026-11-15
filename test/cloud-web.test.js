@@ -344,35 +344,45 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
     await mobilePage.unroute('**/api/import/documents');
     assert.equal(await mobilePage.locator('#import-doc').textContent(), '导入 Markdown');
 
+    await mobilePage.evaluate(() => {
+      window.sharedFiles = [];
+      Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+      Object.defineProperty(navigator, 'share', { configurable: true, value: async ({files}) => {
+        window.sharedFiles.push({name: files[0].name, size: files[0].size});
+        throw new DOMException('User cancelled', 'AbortError');
+      }});
+    });
     // Shortcut settings: real download path, URL, one-time token, rotation and
     // revocation. The dialog must not cache or re-reveal the clear token.
     await mobilePage.locator('#shortcut-settings').click();
     await mobilePage.locator('#shortcut-dialog').waitFor({ state: 'visible', timeout: 5000 });
     assert.equal(await mobilePage.locator('#shortcut-url').inputValue(), base);
-    assert.match(await mobilePage.locator('#shortcut-download').getAttribute('href'), /\/shortcuts\/Open-in-Modu\.shortcut$/);
+    assert.match(await mobilePage.locator('#shortcut-download-url').inputValue(), /\/shortcuts\/Open-in-Modu\.shortcut$/);
     await mobilePage.locator('#shortcut-generate').click();
     await mobilePage.locator('#shortcut-token-secret').waitFor({ state: 'visible', timeout: 10000 });
     const firstToken = await mobilePage.locator('#shortcut-token-value').inputValue();
     assert.match(firstToken, /^modu_import_[a-f0-9]{24}_[A-Za-z0-9_-]{43}$/);
-    // iPad may render the attachment as a file preview instead of downloading.
-    // It must open separately and preserve both the reader and one-time token.
+    // No top-level navigation or popup, even when system file sharing is cancelled.
     const readerUrl = mobilePage.url();
-    const downloadLink = mobilePage.locator('#shortcut-download');
-    assert.equal(await downloadLink.getAttribute('target'), '_blank');
-    assert.equal(await downloadLink.getAttribute('download'), null);
-    await mobile.route('**/shortcuts/Open-in-Modu.shortcut', route => route.fulfill({
-      contentType: 'text/html', body: '<h1>System file preview</h1>',
-    }));
-    const previewPromise = mobile.waitForEvent('page');
-    await downloadLink.click();
-    const preview = await previewPromise;
-    await preview.locator('h1').waitFor();
+    const pagesBefore = mobile.pages().length;
+    const downloadButton = mobilePage.locator('#shortcut-download');
+    await downloadButton.filter({hasText: '保存快捷指令文件'}).waitFor();
+    await downloadButton.click();
+    await mobilePage.waitForFunction(() => window.sharedFiles.length === 1);
     assert.equal(mobilePage.url(), readerUrl);
+    assert.equal(mobile.pages().length, pagesBefore);
     assert.equal(await mobilePage.locator('#shortcut-dialog').isVisible(), true);
     assert.equal(await mobilePage.locator('#shortcut-token-value').inputValue(), firstToken);
-    assert.equal(await preview.evaluate(() => window.opener === null), true);
-    await preview.close();
-    await mobile.unroute('**/shortcuts/Open-in-Modu.shortcut');
+    assert.equal(await mobilePage.locator('#shortcut-error').isHidden(), true);
+    assert.equal(await mobilePage.evaluate(() => window.sharedFiles[0].name), '用墨读打开.shortcut');
+    assert.ok(await mobilePage.evaluate(() => window.sharedFiles[0].size > 0));
+    await mobilePage.evaluate(() => {
+      Object.defineProperty(navigator, 'share', { configurable: true, value: async () => { throw new Error('blocked'); }});
+    });
+    await downloadButton.click();
+    await mobilePage.locator('#shortcut-error').filter({hasText: 'Safari'}).waitFor();
+    assert.equal(mobilePage.url(), readerUrl);
+    await mobilePage.evaluate(() => Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => false }));
 
     assert.match(await mobilePage.locator('#shortcut-token-hint').textContent(), /只显示一次|不能读取/);
     await mobilePage.locator('#shortcut-close').click();
@@ -382,6 +392,8 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
     await mobilePage.locator('#shortcut-token-status').filter({ hasText: '已启用' }).waitFor({ timeout: 10000 });
     assert.equal(await mobilePage.locator('#shortcut-token-secret').isHidden(), true);
     assert.equal(await mobilePage.locator('#shortcut-token-value').inputValue(), '');
+    await mobilePage.locator('#shortcut-download').filter({hasText: '复制下载链接'}).waitFor();
+    assert.equal(await mobilePage.locator('#shortcut-download').getAttribute('href'), null);
 
     await mobilePage.locator('#shortcut-generate').click();
     await mobilePage.locator('#shortcut-token-secret').waitFor({ state: 'visible', timeout: 10000 });

@@ -54,6 +54,9 @@ const els = {
   shortcutSettings: $('#shortcut-settings'),
   shortcutDialog: $('#shortcut-dialog'),
   shortcutClose: $('#shortcut-close'),
+  shortcutDownload: $('#shortcut-download'),
+  shortcutDownloadUrl: $('#shortcut-download-url'),
+  shortcutCopyDownload: $('#shortcut-copy-download'),
   shortcutUrl: $('#shortcut-url'),
   shortcutCopyUrl: $('#shortcut-copy-url'),
   shortcutTokenStatus: $('#shortcut-token-status'),
@@ -2103,6 +2106,50 @@ async function refreshShortcutStatus() {
   }
 }
 
+let shortcutDownloadFile = null;
+let shortcutDownloadPreparing = false;
+
+async function prepareShortcutDownload() {
+  if (shortcutDownloadPreparing) return;
+  shortcutDownloadPreparing = true;
+  shortcutDownloadFile = null;
+  els.shortcutDownload.disabled = true;
+  els.shortcutDownload.textContent = '正在准备文件…';
+  try {
+    const response = await fetch('/shortcuts/Open-in-Modu.shortcut', {
+      cache: 'no-store', signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error('download failed');
+    const blob = await response.blob();
+    const file = new File([blob], '用墨读打开.shortcut', { type: 'application/x-apple-shortcut' });
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      shortcutDownloadFile = file;
+      els.shortcutDownload.textContent = '保存快捷指令文件';
+    } else {
+      els.shortcutDownload.textContent = '复制下载链接，在 Safari 中安装';
+    }
+  } catch {
+    els.shortcutDownload.textContent = '复制下载链接，在 Safari 中安装';
+  } finally {
+    shortcutDownloadPreparing = false;
+    els.shortcutDownload.disabled = false;
+  }
+}
+
+async function saveShortcutDownload() {
+  if (!shortcutDownloadFile) {
+    return copyShortcutValue(els.shortcutDownloadUrl.value, els.shortcutDownloadUrl, '下载链接（请粘贴到 Safari 地址栏）');
+  }
+  // File is prefetched: invoke share inside the click activation, before any await.
+  try {
+    await navigator.share({ files: [shortcutDownloadFile] });
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      setShortcutError('系统暂不支持保存此文件。请复制下载链接，在 Safari 地址栏中粘贴打开。');
+    }
+  }
+}
+
 function openShortcutDialog() {
   if (!state.authenticated || !state.online) return;
   state.shortcutToken = '';
@@ -2110,6 +2157,8 @@ function openShortcutDialog() {
   els.shortcutTokenSecret.hidden = true;
   els.shortcutTokenValue.value = '';
   els.shortcutUrl.value = location.origin;
+  els.shortcutDownloadUrl.value = new URL('/shortcuts/Open-in-Modu.shortcut', location.origin).href;
+  prepareShortcutDownload();
   els.shortcutTokenStatus.textContent = '正在读取…';
   els.shortcutGenerate.textContent = '生成令牌';
   els.shortcutRevoke.hidden = true;
@@ -3428,6 +3477,8 @@ function bindEvents() {
   });
   els.shortcutSettings.addEventListener('click', openShortcutDialog);
   els.shortcutClose.addEventListener('click', () => closeShortcutDialog());
+  els.shortcutDownload.addEventListener('click', saveShortcutDownload);
+  els.shortcutCopyDownload.addEventListener('click', () => copyShortcutValue(els.shortcutDownloadUrl.value, els.shortcutDownloadUrl, '下载链接（请粘贴到 Safari 地址栏）'));
   els.shortcutDialog.addEventListener('click', (event) => {
     if (event.target === els.shortcutDialog) closeShortcutDialog();
   });

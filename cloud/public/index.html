@@ -324,10 +324,14 @@
         不能读取、整理或覆盖你已有的任何文档。
       </p>
 
-      <a class="primary-button shortcut-download" id="shortcut-download" href="/shortcuts/Open-in-Modu.shortcut" target="_blank" rel="noopener noreferrer" aria-describedby="shortcut-download-hint">
-        下载通用快捷指令
-      </a>
-      <p class="shortcut-hint" id="shortcut-download-hint">下载将在单独窗口打开，墨读页面会保留；安装后切回墨读即可。添加时按提示填写下面的服务网址和仅导入令牌；以后无需重复设置。</p>
+      <button class="primary-button shortcut-download" id="shortcut-download" type="button" aria-describedby="shortcut-download-hint">
+        保存快捷指令文件
+      </button>
+      <p class="shortcut-hint" id="shortcut-download-hint">通过系统分享面板保存到“文件”，再从“文件”中打开安装。取消分享会留在墨读；如果不支持，可复制下面的下载链接到 Safari 中打开。</p>
+      <div class="shortcut-copy-row">
+        <input id="shortcut-download-url" type="text" readonly aria-label="快捷指令下载链接">
+        <button class="library-mini-button" id="shortcut-copy-download" type="button">复制下载链接</button>
+      </div>
 
       <div class="dialog-field">
         <label for="shortcut-url">服务 URL</label>
