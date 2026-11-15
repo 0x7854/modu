@@ -36,6 +36,15 @@ class ShortcutFormatTest(unittest.TestCase):
     def test_generated_condition_references_upload_url(self):
         validate_condition(builder.build())
 
+    def test_success_only_confirms_import_without_launching_browser(self):
+        actions = builder.build()['WFWorkflowActions']
+        self.assertFalse(any(a['WFWorkflowActionIdentifier'] == 'is.workflow.actions.openurl'
+                             for a in actions))
+        success = actions[7]
+        self.assertEqual(success['WFWorkflowActionIdentifier'], 'is.workflow.actions.showresult')
+        self.assertIn('已加入墨读', success['WFWorkflowActionParameters']['Text']['Value']['string'])
+        self.assertEqual(actions[8]['WFWorkflowActionParameters']['WFControlFlowMode'], 1)
+
     def test_rejects_original_blank_condition_encoding(self):
         workflow = builder.build()
         condition = workflow['WFWorkflowActions'][6]['WFWorkflowActionParameters']

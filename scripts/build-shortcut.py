@@ -62,7 +62,7 @@ def build(server='https://reader.example.com', token='CONFIGURE_IMPORT_TOKEN', n
     action('conditional', WFInput={'Type': 'Variable',
            'Variable': attachment(output('url','阅读地址'))}, WFCondition=100,
            GroupingIdentifier=group, WFControlFlowMode=0)
-    action('openurl', WFInput=text(output('server','服务网址'),output('url','阅读地址')))
+    action('showresult', Text=text('已加入墨读。\n点开桌面的墨读图标，即可在云文库中阅读。'))
     action('conditional', GroupingIdentifier=group, WFControlFlowMode=1)
     action('getvalueforkey','error',WFInput=attachment(output('upload','上传结果')),WFDictionaryKey='error.message')
     action('showresult',Text=text('导入未完成：',output('error','错误信息'),'\n请检查网址、仅导入凭证和文件格式。'))
