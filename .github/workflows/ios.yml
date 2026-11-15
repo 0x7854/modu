@@ -1,0 +1,17 @@
+name: iOS build
+on:
+  push:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test native URL routing
+        run: sh ios/Scripts/test-link-router.sh
+      - name: Build iPad and iPhone app without signing
+        run: xcodebuild -project ios/Modu.xcodeproj -scheme Modu -sdk iphonesimulator -configuration Debug -derivedDataPath .build/ios CODE_SIGNING_ALLOWED=NO build
