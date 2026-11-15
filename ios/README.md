@@ -7,9 +7,9 @@
 ## 当前验证状态（如实说明）
 
 - 当前开发机只有 CommandLineTools，**没有完整 Xcode，也没有 iOS SDK / 模拟器**。
-- 因此本次**没有执行 `xcodebuild`，没有构建模拟器，没有在 iPad/iPhone 上签名或安装**。
+- 完整 iOS 模拟器构建已在 [GitHub macOS CI](https://github.com/0x7854/modu/actions/runs/43738935637) 通过（代码提交 `fc834cd`），使用 `CODE_SIGNING_ALLOWED=NO`；**没有在 iPad/iPhone 上签名或安装**。
 - 本机完成 plist / 工程语法检查、Swift 语法解析和 Foundation 路由测试；完整 iOS SDK 构建交由 GitHub macOS CI 检查，结果以当前提交的 workflow 为准。
-- 仓库维护者用 GitHub macOS runner 做最终 Swift 编译与 iOS SDK 构建验证是合适的，但这不等于已在真机安装。
+- 本机 Foundation 路由 99 项检查、Swift 语法解析和工程 plist 检查通过；云端编译通过不等于真机界面或分享流程已验收。
 
 ## 直接打开
 
@@ -47,7 +47,7 @@ ios/Modu.xcodeproj
 ### 免费签名的真实限制
 
 - 免费 Personal Team 的 provisioning profile 通常 **7 天过期**。过期后 App 无法启动，需要重新用 Xcode Run 安装。
-- 免费账号通常有设备上自签 App 数量限制（常见为 3 个），且不支持推送、App Store 发布等能力。
+- 免费账号不支持 TestFlight 和 App Store 分发；具体设备及 App ID 限额以 Apple 账户规则为准。
 - 到期提醒、重新签名和每周安装是免费方案的一部分，不是这个工程能绕过的限制。
 - 模拟器构建不需要设备签名；真机安装必须选择你自己的 Team。
 
