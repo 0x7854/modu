@@ -243,3 +243,220 @@ test(`cloud reader ${browserKind}: auth, XSS, update, scroll restore, rotation, 
 
   assert.deepEqual(pageErrors, []);
 });
+
+test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file, network error, shortcut token`, {
+  skip: canRun ? false : 'No Playwright browser available',
+  timeout: 120000,
+}, async () => {
+  const mobile = await browser.newContext({
+    // page.route cannot intercept service-worker handled requests; SW upgrades are tested separately.
+    serviceWorkers: 'block',
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+    hasTouch: true,
+    isMobile: true,
+  });
+  const mobilePage = await mobile.newPage();
+  const pageErrors = [];
+  mobilePage.on('pageerror', (error) => pageErrors.push(error.message));
+  try {
+    await mobilePage.goto(base, { waitUntil: 'domcontentloaded' });
+    await mobilePage.locator('#auth-screen').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('#login-user').fill('alice');
+    await mobilePage.locator('#login-pass').fill('correct horse battery');
+    await mobilePage.locator('#login-submit').click();
+    await mobilePage.locator('#cloud-shell').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Open the narrow drawer and confirm the new import/shortcut controls do
+    // not break the existing edge/drawer shell.
+    await mobilePage.locator('#library-toggle').click();
+    await mobilePage.locator('#library').waitFor({ state: 'visible', timeout: 5000 });
+    assert.equal(await mobilePage.locator('#library').evaluate((node) => node.classList.contains('is-open')), true);
+    await mobilePage.locator('#import-doc').waitFor({ state: 'visible' });
+    await mobilePage.locator('#shortcut-settings').waitFor({ state: 'visible' });
+
+    const beforeCount = await mobilePage.locator('#doc-list [data-doc-id]').count();
+    await mobilePage.locator('#import-file').setInputFiles({
+      name: 'unsupported.pdf',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('not markdown'),
+    });
+    await mobilePage.getByText('请选择 Markdown、HTML 或纯文本文件，不支持此文件后缀。').waitFor({ timeout: 5000 });
+    assert.equal(await mobilePage.locator('#doc-list [data-doc-id]').count(), beforeCount);
+
+    await mobilePage.locator('#import-file').setInputFiles({
+      name: '中文 同名.md',
+      mimeType: 'text/markdown',
+      buffer: Buffer.from('# 导入一\n\n第一份正文\n'),
+    });
+    await mobilePage.getByText('第一份正文').first().waitFor({ timeout: 10000 });
+    const firstHash = await mobilePage.evaluate(() => location.hash);
+    assert.match(firstHash, /^#doc-[a-f0-9]{32}$/);
+    const firstId = firstHash.slice('#doc-'.length);
+    const firstDoc = await mobilePage.evaluate(async (id) => {
+      const response = await fetch(`/api/documents/${id}`);
+      return response.json();
+    }, firstId);
+    assert.equal(firstDoc.doc.name, '中文 同名.md');
+    const firstLibrary = await mobilePage.evaluate(async () => (await (await fetch('/api/library')).json()).library);
+    assert.equal(firstLibrary.assignments[firstId], undefined, 'imports default to unfiled');
+
+    await mobilePage.locator('#library-toggle').click();
+    await mobilePage.locator('#library').waitFor({ state: 'visible', timeout: 5000 });
+    await mobilePage.locator('#import-file').setInputFiles({
+      name: '中文 同名.md',
+      mimeType: 'text/markdown',
+      buffer: Buffer.from('# 导入二\n\n第二份正文，不是合并\n'),
+    });
+    await mobilePage.getByText('第二份正文，不是合并').first().waitFor({ timeout: 10000 });
+    const secondHash = await mobilePage.evaluate(() => location.hash);
+    assert.match(secondHash, /^#doc-[a-f0-9]{32}$/);
+    assert.notEqual(secondHash, firstHash, 'same filename creates a distinct document');
+    const sameNameCount = await mobilePage.evaluate(async () => {
+      const payload = await (await fetch('/api/documents')).json();
+      return payload.documents.filter((doc) => doc.name === '中文 同名.md').length;
+    });
+    assert.equal(sameNameCount, 2);
+
+    // Generic iOS text shares may keep no extension or acquire .txt.
+    for (const name of ['分享文件', '分享文件.txt', '分享文件.md.txt']) {
+      await mobilePage.locator('#library-toggle').click();
+      await mobilePage.locator('#import-file').setInputFiles({
+        name, mimeType: 'text/plain', buffer: Buffer.from(`# 分享文本\n\n正文保留 ${name}`),
+      });
+      await mobilePage.getByText(`正文保留 ${name}`, {exact: true}).waitFor();
+      const saved = await mobilePage.evaluate(async () =>
+        (await (await fetch('/api/documents/' + location.hash.slice(5))).json()).doc);
+      assert.equal(saved.name, '分享文件.md');
+      assert.equal(saved.markdown, `# 分享文本\n\n正文保留 ${name}`);
+    }
+
+
+    // File imports must retain HTML source and use the sandbox renderer.
+    for (const name of ['飞书页面.html', '飞书页面.htm', '飞书页面', '飞书页面.txt', '飞书页面.html.txt']) {
+      const content = '<!doctype html><html><body><button id="import-counter" onclick="this.textContent=Number(this.textContent)+1">0</button></body></html>';
+      await mobilePage.locator('#library-toggle').click();
+      const previousHash = await mobilePage.evaluate(() => location.hash);
+      await mobilePage.locator('#import-file').setInputFiles({ name, mimeType: 'text/html', buffer: Buffer.from(content) });
+      await mobilePage.waitForFunction(previous => location.hash !== previous, previousHash);
+      const counter = mobilePage.frameLocator('#html-frame').locator('#import-counter');
+      await counter.waitFor();
+      await mobilePage.locator('#doc-loading').waitFor({state: 'hidden'});
+      await counter.click();
+      await counter.filter({hasText: /^1$/}).waitFor();
+      assert.equal(await counter.textContent(), '1');
+      const id = await mobilePage.evaluate(() => location.hash.slice(5));
+      const saved = await store.getDocument(aliceUserId, id);
+      assert.equal(saved.kind, 'html');
+      assert.equal(saved.html, content);
+      assert.equal(await mobilePage.locator('#html-frame').getAttribute('sandbox'), 'allow-scripts');
+      await mobilePage.locator('#doc-loading').waitFor({state: 'hidden'});
+      await mobilePage.waitForFunction(() => !document.querySelector('#import-doc').disabled);
+    }
+
+    // A lost network request must surface an error and must not leave the import
+    // button stuck in its loading state.
+    await mobilePage.route('**/api/import/documents', (route) => route.abort('failed'));
+    await mobilePage.locator('#library-toggle').click();
+    await mobilePage.locator('#library').waitFor({ state: 'visible', timeout: 5000 });
+    await mobilePage.locator('#import-file').setInputFiles({
+      name: '网络失败.md',
+      mimeType: 'text/markdown',
+      buffer: Buffer.from('# 断网\n'),
+    });
+    await mobilePage.getByText('网络连接失败，请稍后重试。').waitFor({ timeout: 10000 });
+    await mobilePage.unroute('**/api/import/documents');
+    assert.equal(await mobilePage.locator('#import-doc').textContent(), '导入文档');
+
+    await mobilePage.evaluate(() => {
+      window.sharedFiles = [];
+      Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+      Object.defineProperty(navigator, 'share', { configurable: true, value: async ({files}) => {
+        window.sharedFiles.push({name: files[0].name, size: files[0].size});
+        throw new DOMException('User cancelled', 'AbortError');
+      }});
+    });
+    // Shortcut settings: real download path, URL, one-time token, rotation and
+    // revocation. The dialog must not cache or re-reveal the clear token.
+    await mobilePage.locator('#shortcut-settings').click();
+    await mobilePage.locator('#shortcut-dialog').waitFor({ state: 'visible', timeout: 5000 });
+    assert.equal(await mobilePage.locator('#shortcut-url').inputValue(), base);
+    assert.match(await mobilePage.locator('#shortcut-download-url').inputValue(), /\/shortcuts\/Open-in-Modu\.shortcut$/);
+    await mobilePage.locator('#shortcut-generate').click();
+    await mobilePage.locator('#shortcut-token-secret').waitFor({ state: 'visible', timeout: 10000 });
+    const firstToken = await mobilePage.locator('#shortcut-token-value').inputValue();
+    assert.match(firstToken, /^modu_import_[a-f0-9]{24}_[A-Za-z0-9_-]{43}$/);
+    // No top-level navigation or popup, even when system file sharing is cancelled.
+    const readerUrl = mobilePage.url();
+    const pagesBefore = mobile.pages().length;
+    const downloadButton = mobilePage.locator('#shortcut-download');
+    await downloadButton.filter({hasText: '保存快捷指令文件'}).waitFor();
+    await downloadButton.click();
+    await mobilePage.waitForFunction(() => window.sharedFiles.length === 1);
+    assert.equal(mobilePage.url(), readerUrl);
+    assert.equal(mobile.pages().length, pagesBefore);
+    assert.equal(await mobilePage.locator('#shortcut-dialog').isVisible(), true);
+    assert.equal(await mobilePage.locator('#shortcut-token-value').inputValue(), firstToken);
+    assert.equal(await mobilePage.locator('#shortcut-error').isHidden(), true);
+    assert.equal(await mobilePage.evaluate(() => window.sharedFiles[0].name), '用墨读打开.shortcut');
+    assert.ok(await mobilePage.evaluate(() => window.sharedFiles[0].size > 0));
+    await mobilePage.evaluate(() => {
+      Object.defineProperty(navigator, 'share', { configurable: true, value: async () => { throw new Error('blocked'); }});
+    });
+    await downloadButton.click();
+    await mobilePage.locator('#shortcut-error').filter({hasText: 'Safari'}).waitFor();
+    assert.equal(mobilePage.url(), readerUrl);
+    await mobilePage.evaluate(() => Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => false }));
+
+    assert.match(await mobilePage.locator('#shortcut-token-hint').textContent(), /只显示一次|不能读取/);
+    await mobilePage.locator('#shortcut-close').click();
+    await mobilePage.locator('#shortcut-dialog').waitFor({ state: 'hidden' });
+    await mobilePage.locator('#shortcut-settings').click();
+    await mobilePage.locator('#shortcut-dialog').waitFor({ state: 'visible' });
+    await mobilePage.locator('#shortcut-token-status').filter({ hasText: '已启用' }).waitFor({ timeout: 10000 });
+    assert.equal(await mobilePage.locator('#shortcut-token-secret').isHidden(), true);
+    assert.equal(await mobilePage.locator('#shortcut-token-value').inputValue(), '');
+    await mobilePage.locator('#shortcut-download').filter({hasText: '复制下载链接'}).waitFor();
+    assert.equal(await mobilePage.locator('#shortcut-download').getAttribute('href'), null);
+
+    await mobilePage.locator('#shortcut-generate').click();
+    await mobilePage.locator('#shortcut-token-secret').waitFor({ state: 'visible', timeout: 10000 });
+    const secondToken = await mobilePage.locator('#shortcut-token-value').inputValue();
+    assert.notEqual(secondToken, firstToken);
+    const oldTokenStatus = await mobilePage.evaluate(async (token) => {
+      const response = await fetch('/api/import/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: 'old-token.md', markdown: '# old' }),
+      });
+      return response.status;
+    }, firstToken);
+    assert.equal(oldTokenStatus, 401, 'rotation revokes the previous token');
+
+    await mobilePage.locator('#shortcut-revoke').click();
+    await mobilePage.locator('#shortcut-token-status').filter({ hasText: '尚未生成' }).waitFor({ timeout: 10000 });
+    const revokedStatus = await mobilePage.evaluate(async (token) => {
+      const response = await fetch('/api/import/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: 'revoked-token.md', markdown: '# revoked' }),
+      });
+      return response.status;
+    }, secondToken);
+    assert.equal(revokedStatus, 401);
+    await mobilePage.locator('#shortcut-close').click();
+    await mobilePage.locator('#shortcut-dialog').waitFor({ state: 'hidden' });
+
+    // The drawer still closes and reopens after the dialogs, so the new tools
+    // did not steal the edge/drawer state.
+    await mobilePage.locator('#library-close').click();
+    await mobilePage.waitForTimeout(350);
+    assert.equal(await mobilePage.locator('#library').evaluate((node) => node.classList.contains('is-open')), false);
+    await mobilePage.locator('#library-toggle').click();
+    await mobilePage.locator('#library').waitFor({ state: 'visible', timeout: 5000 });
+    assert.equal(await mobilePage.locator('#library').evaluate((node) => node.classList.contains('is-open')), true);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await mobile.close();
+  }
+});

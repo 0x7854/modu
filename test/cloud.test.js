@@ -100,6 +100,39 @@ async function putDoc(token, id, { name = 'doc.md', markdown }) {
   });
 }
 
+function importFetch(token, body) {
+  return fetch(`${base}/api/import/documents`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+function importWithSession(auth, body, { csrf = auth.csrf } = {}) {
+  return apiFetch('/api/import/documents', {
+    cookie: auth.cookie,
+    csrf,
+    method: 'POST',
+    body,
+  });
+}
+
+async function issueImportToken(auth) {
+  const response = await apiFetch('/api/import/token', {
+    cookie: auth.cookie,
+    csrf: auth.csrf,
+    method: 'POST',
+    body: {},
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.match(payload.token, /^modu_import_[a-f0-9]{24}_[A-Za-z0-9_-]{43}$/);
+  return payload;
+}
+
 before(async () => {
   tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'modu-cloud-test-'));
   store = await new CloudStore(path.join(tmpRoot, 'data'), { maxDocBytes: 4096 }).init();
@@ -401,4 +434,515 @@ test('reverse-proxy HTTPS marks cookies Secure and validates the public origin',
     base = oldBase;
     await closeServer(proxied);
   }
+});
+
+test('mobile import accepts cookie+CSRF or import-only bearer, and never widens either credential', async () => {
+  const created = await store.addUser('carol', 'carol long password');
+  const auth = await session('carol', 'carol long password');
+
+  const anonymous = await importFetch('', { name: 'anon.md', markdown: '# no' });
+  assert.equal(anonymous.status, 401);
+
+  const noCsrf = await importWithSession(auth, { name: 'csrf.md', markdown: '# no' }, { csrf: '' });
+  assert.equal(noCsrf.status, 403);
+  assert.equal((await noCsrf.json()).error.code, 'CSRF_REQUIRED');
+  const wrongCsrf = await importWithSession(auth, { name: 'csrf.md', markdown: '# no' }, { csrf: 'wrong' });
+  assert.equal(wrongCsrf.status, 403);
+
+  const first = await importWithSession(auth, {
+    name: '中文 同名.md',
+    markdown: '# 你好\n\n第一份。\n',
+  });
+  assert.equal(first.status, 201);
+  const firstPayload = await first.json();
+  assert.match(firstPayload.doc.id, /^[a-f0-9]{32}$/);
+  assert.equal(firstPayload.doc.name, '中文 同名.md');
+  assert.equal(firstPayload.doc.kind, 'markdown');
+  assert.equal(firstPayload.url, `/#doc-${firstPayload.doc.id}`);
+  assert.equal(firstPayload.replayed, false);
+
+  const sameName = await importWithSession(auth, {
+    name: '中文 同名.md',
+    markdown: '# 你好\n\n第二份，不是覆盖。\n',
+  });
+  assert.equal(sameName.status, 201);
+  const sameNamePayload = await sameName.json();
+  assert.notEqual(sameNamePayload.doc.id, firstPayload.doc.id, 'same filename must create a new document');
+
+  const library = await (await apiFetch('/api/library', auth)).json();
+  assert.equal(library.library.assignments[firstPayload.doc.id], undefined, 'imports start unfiled');
+
+  const issued = await issueImportToken(auth);
+  assert.equal(issued.configured, true);
+  assert.equal(issued.valid, true);
+  assert.equal(issued.tokenInfo.configured, true);
+  assert.equal(issued.tokenInfo.valid, true);
+  assert.equal('tokenHash' in issued, false);
+  assert.equal('tokenHash' in issued.tokenInfo, false);
+
+  const tokenReadList = await apiFetch('/api/documents', {
+    headers: { Authorization: `Bearer ${issued.token}` },
+  });
+  assert.equal(tokenReadList.status, 401, 'import token must not read the library');
+  const tokenReadDoc = await apiFetch(`/api/documents/${firstPayload.doc.id}`, {
+    headers: { Authorization: `Bearer ${issued.token}` },
+  });
+  assert.equal(tokenReadDoc.status, 401);
+  const tokenManage = await apiFetch('/api/import/token', {
+    headers: { Authorization: `Bearer ${issued.token}` },
+  });
+  assert.equal(tokenManage.status, 401, 'import token cannot manage tokens');
+  const tokenSync = await syncFetch(issued.token, `/api/sync/documents/${idFor(9000)}`, {
+    method: 'PUT',
+    body: { name: 'x.md', markdown: '# x' },
+  });
+  assert.equal(tokenSync.status, 401, 'import token cannot write through the sync API');
+
+  const syncAsImport = await importFetch(created.syncToken, {
+    name: 'sync-token.md',
+    markdown: '# no',
+  });
+  assert.equal(syncAsImport.status, 401, 'sync token is not an import token');
+
+  const bob = await session('alice', 'correct horse battery');
+  const crossRead = await apiFetch(`/api/documents/${firstPayload.doc.id}`, bob);
+  assert.equal(crossRead.status, 404, 'another account cannot read an imported document');
+
+  const tooLargeBody = await importFetch(issued.token, {
+    name: 'huge.md',
+    markdown: `# huge\n${'x'.repeat(200_000)}`,
+  });
+  assert.equal(tooLargeBody.status, 413);
+  assert.equal((await tooLargeBody.json()).error.code, 'BODY_TOO_LARGE');
+
+  const badType = await importFetch(issued.token, { name: 'note.pdf', markdown: '# nope' });
+  assert.equal(badType.status, 415);
+  const badName = await importFetch(issued.token, { name: '../escape.md', markdown: '# nope' });
+  assert.equal(badName.status, 400);
+  const controlName = await importFetch(issued.token, {
+    name: 'bad\u0000name.md',
+    markdown: '# nope',
+  });
+  assert.equal(controlName.status, 400);
+  const badMarkdown = await importFetch(issued.token, { name: 'missing.md' });
+  assert.equal(badMarkdown.status, 400);
+  assert.equal((await badMarkdown.json()).error.code, 'INVALID_MARKDOWN');
+  const badRequestId = await importFetch(issued.token, {
+    name: 'bad-id.md',
+    markdown: '# bad',
+    requestId: 'NOT-32-HEX',
+  });
+  assert.equal(badRequestId.status, 400);
+  assert.equal((await badRequestId.json()).error.code, 'INVALID_REQUEST_ID');
+});
+
+test('import requestId is idempotent per user, rejects conflicts, and never overwrites existing docs', async () => {
+  const created = await store.addUser('dave', 'dave long password');
+  const auth = await session('dave', 'dave long password');
+  const issued = await issueImportToken(auth);
+
+  const existingId = idFor(5000);
+  assert.equal((await putDoc(created.syncToken, existingId, {
+    name: 'keep.md',
+    markdown: '# keep me\n',
+  })).status, 200);
+
+  const requestId = '1'.repeat(32);
+  const first = await importFetch(issued.token, {
+    name: '同名.md',
+    markdown: '# first\n',
+    requestId,
+  });
+  assert.equal(first.status, 201);
+  const firstPayload = await first.json();
+  const replay = await importFetch(issued.token, {
+    name: '同名.md',
+    markdown: '# first\n',
+    requestId,
+  });
+  assert.equal(replay.status, 200);
+  const replayPayload = await replay.json();
+  assert.equal(replayPayload.replayed, true);
+  assert.equal(replayPayload.doc.id, firstPayload.doc.id);
+
+  const conflict = await importFetch(issued.token, {
+    name: '同名.md',
+    markdown: '# different\n',
+    requestId,
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error.code, 'IMPORT_CONFLICT');
+
+  const sameNameNewId = await importFetch(issued.token, {
+    name: '同名.md',
+    markdown: '# second\n',
+  });
+  assert.equal(sameNameNewId.status, 201);
+  const sameNamePayload = await sameNameNewId.json();
+  assert.notEqual(sameNamePayload.doc.id, firstPayload.doc.id);
+
+  const untouched = await (await apiFetch(`/api/documents/${existingId}`, auth)).json();
+  assert.equal(untouched.doc.markdown, '# keep me\n');
+  assert.equal(untouched.doc.revision, 1);
+  assert.equal(untouched.doc.name, 'keep.md');
+
+  const concurrentId = '2'.repeat(32);
+  const [left, right] = await Promise.all([
+    importFetch(issued.token, { name: '并发.md', markdown: '# once\n', requestId: concurrentId }),
+    importFetch(issued.token, { name: '并发.md', markdown: '# once\n', requestId: concurrentId }),
+  ]);
+  assert.deepEqual([left.status, right.status].sort(), [200, 201]);
+  const [leftPayload, rightPayload] = await Promise.all([left.json(), right.json()]);
+  assert.equal(leftPayload.doc.id, rightPayload.doc.id);
+  assert.equal(leftPayload.replayed === rightPayload.replayed, false);
+
+  const exactlyMax = await importFetch(issued.token, {
+    name: 'boundary.md',
+    markdown: 'x'.repeat(4096),
+  });
+  assert.equal(exactlyMax.status, 201);
+  const overMax = await importFetch(issued.token, {
+    name: 'boundary-over.md',
+    markdown: 'x'.repeat(4097),
+  });
+  assert.equal(overMax.status, 413);
+  assert.equal((await overMax.json()).error.code, 'DOCUMENT_TOO_LARGE');
+});
+
+test('import token rotates, revokes, and is invalidated by password reset, account disable, and authVersion', async () => {
+  const created = await store.addUser('erin', 'erin long password');
+  const auth = await session('erin', 'erin long password');
+  const first = await issueImportToken(auth);
+
+  const tokenFile = path.join(tmpRoot, 'data', 'import-tokens', `${created.user.id}.json`);
+  const storedToken = await fsp.readFile(tokenFile, 'utf8');
+  assert.equal(storedToken.includes(first.token), false, 'token file must be hash-only');
+  assert.match(storedToken, /"tokenHash": "[a-f0-9]{64}"/);
+  assert.equal((await fsp.stat(tokenFile)).mode & 0o777, 0o600);
+  const usersText = await fsp.readFile(path.join(tmpRoot, 'data', 'users.json'), 'utf8');
+  assert.equal(usersText.includes(first.token), false, 'users.json must not contain import tokens');
+  assert.equal(usersText.includes('tokenHash'), false);
+
+  const status = await (await apiFetch('/api/import/token', { cookie: auth.cookie })).json();
+  assert.equal(status.configured, true);
+  assert.equal(status.valid, true);
+  assert.equal('token' in status, false, 'status must never return a clear token');
+  assert.equal('tokenHash' in status, false);
+
+  const second = await issueImportToken(auth);
+  assert.notEqual(second.token, first.token);
+  assert.equal((await importFetch(first.token, {
+    name: 'old.md',
+    markdown: '# old',
+  })).status, 401);
+  assert.equal((await importFetch(second.token, {
+    name: 'new.md',
+    markdown: '# new',
+  })).status, 201);
+
+  const noCsrfDelete = await apiFetch('/api/import/token', {
+    cookie: auth.cookie,
+    method: 'DELETE',
+    body: {},
+  });
+  assert.equal(noCsrfDelete.status, 403);
+  const revoked = await apiFetch('/api/import/token', {
+    cookie: auth.cookie,
+    csrf: auth.csrf,
+    method: 'DELETE',
+    body: {},
+  });
+  assert.equal(revoked.status, 200);
+  assert.equal((await revoked.json()).configured, false);
+  assert.equal((await importFetch(second.token, {
+    name: 'revoked.md',
+    markdown: '# revoked',
+  })).status, 401);
+
+  const third = await issueImportToken(auth);
+  const externalStore = await new CloudStore(path.join(tmpRoot, 'data')).init();
+  await externalStore.resetPassword(created.user.id, 'erin new long password');
+  assert.equal((await importFetch(third.token, {
+    name: 'after-reset.md',
+    markdown: '# reset',
+  })).status, 401, 'authVersion rotation revokes import tokens');
+  const newAuth = await session('erin', 'erin new long password');
+  const staleStatus = await (await apiFetch('/api/import/token', { cookie: newAuth.cookie })).json();
+  assert.equal(staleStatus.configured, true);
+  assert.equal(staleStatus.valid, false);
+
+  const fourth = await issueImportToken(newAuth);
+  assert.equal((await importFetch(fourth.token, {
+    name: 'after-reset-new.md',
+    markdown: '# reset new',
+  })).status, 201);
+
+  const usersPath = path.join(tmpRoot, 'data', 'users.json');
+  const users = JSON.parse(await fsp.readFile(usersPath, 'utf8'));
+  const erin = users.users.find((entry) => entry.id === created.user.id);
+  erin.disabled = true;
+  await fsp.writeFile(usersPath, `${JSON.stringify(users, null, 2)}\n`);
+  assert.equal((await importFetch(fourth.token, {
+    name: 'disabled.md',
+    markdown: '# disabled',
+  })).status, 401, 'disabled accounts cannot import');
+  delete erin.disabled;
+  await fsp.writeFile(usersPath, `${JSON.stringify(users, null, 2)}\n`);
+  assert.equal((await importFetch(fourth.token, {
+    name: 'enabled-again.md',
+    markdown: '# enabled',
+  })).status, 201);
+});
+
+test('import token validation failures are rate limited', async () => {
+  const limited = await createServer({
+    importTokenMaxFailures: 2,
+    importTokenWindowMs: 60_000,
+  });
+  const oldBase = base;
+  base = `http://127.0.0.1:${limited.address().port}`;
+  try {
+    const fake = `modu_import_${'a'.repeat(24)}_${'b'.repeat(43)}`;
+    const first = await importFetch(fake, { name: 'bad-1.md', markdown: '# bad' });
+    assert.equal(first.status, 401);
+    assert.equal((await first.json()).error.code, 'IMPORT_TOKEN_INVALID');
+    const second = await importFetch(fake, { name: 'bad-2.md', markdown: '# bad' });
+    assert.equal(second.status, 401);
+    const third = await importFetch(fake, { name: 'bad-3.md', markdown: '# bad' });
+    assert.equal(third.status, 429);
+    assert.ok(Number(third.headers.get('retry-after')) >= 1);
+  } finally {
+    base = oldBase;
+    await closeServer(limited);
+  }
+});
+
+test('shortcut download is one fixed public path with no caching and no directory traversal', async () => {
+  const tempPublic = path.join(tmpRoot, 'shortcut-public');
+  await fsp.cp(publicDir, tempPublic, { recursive: true });
+  await fsp.mkdir(path.join(tempPublic, 'shortcuts'), { recursive: true });
+  await fsp.writeFile(
+    path.join(tempPublic, 'shortcuts', 'Open-in-Modu.shortcut'),
+    Buffer.from('SIGNED_SHORTCUT_FIXTURE'),
+  );
+  const shortcutServer = await createServer({ publicDir: tempPublic });
+  const oldBase = base;
+  base = `http://127.0.0.1:${shortcutServer.address().port}`;
+  try {
+    const shortcut = await fetch(`${base}/shortcuts/Open-in-Modu.shortcut`);
+    assert.equal(shortcut.status, 200);
+    assert.equal(await shortcut.text(), 'SIGNED_SHORTCUT_FIXTURE');
+    assert.equal(shortcut.headers.get('cache-control'), 'no-store');
+    assert.match(shortcut.headers.get('content-disposition'), /attachment; filename="Open-in-Modu.shortcut"/);
+
+    assert.equal((await fetch(`${base}/shortcuts/Other.shortcut`)).status, 404);
+    assert.equal((await fetch(`${base}/shortcuts/../users.json`)).status, 404);
+  } finally {
+    base = oldBase;
+    await closeServer(shortcutServer);
+    await fsp.rm(tempPublic, { recursive: true, force: true });
+  }
+});
+
+test('shared Markdown survives lost extensions and plain-text names without changing the body', async () => {
+  const account = await store.addUser('shared-text', 'share filename test password');
+  const auth = await session('shared-text', 'share filename test password');
+  const issued = await issueImportToken(auth);
+  const markdown = '# 阅读材料\n\n> 引用\n\n**重点** 与 [链接](https://example.com)\n';
+  for (const [name, expected] of [['AI___', 'AI___.md'], ['文本文稿.txt', '文本文稿.md'], ['原稿.md.txt', '原稿.md'], ['原稿.MD', '原稿.MD'], ['.md', '.md'], ['原稿.markdown', '原稿.markdown']]) {
+    const response = await importFetch(issued.token, {name, markdown});
+    assert.equal(response.status, 201, name);
+    const result = await response.json();
+    assert.equal(result.doc.name, expected);
+    assert.equal((await store.getDocument(account.user.id, result.doc.id)).markdown, markdown);
+  }
+  const requestId = '8'.repeat(32);
+  const first = await (await importFetch(issued.token, {name:'重试', markdown, requestId})).json();
+  const replay = await importFetch(issued.token, {name:'重试.md', markdown, requestId});
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).doc.id, first.doc.id);
+  for (const name of ['file.pdf', 'file.docx', 'image.png']) {
+    assert.equal((await importFetch(issued.token, {name, markdown})).status, 415, name);
+  }
+  for (const name of ['.', '..', 'a'.repeat(198)]) {
+    assert.equal((await importFetch(issued.token, {name, markdown})).status, 400, name);
+  }
+  assert.equal((await importFetch(issued.token, {name:'binary', markdown:'text\u0000binary'})).status,400);
+});
+
+test('shared HTML imports through token and session preserve source and use the sandboxed preview', async () => {
+  const account = await store.addUser('shared-html', 'share html password');
+  const auth = await session('shared-html', 'share html password');
+  const issued = await issueImportToken(auth);
+  const html = '\uFEFF  <!-- leading comment -->\n<!doctype html>\n<html lang="zh"><head><meta charset="utf-8"><style>body{margin:0}</style></head><body><h1>HTML 原文</h1><button id="counter" onclick="this.textContent=Number(this.textContent)+1">0</button><script>window.__htmlImported=true;</script></body></html>\n';
+  const requestId = '9'.repeat(32);
+
+  const imported = await importFetch(issued.token, {
+    name: '分享页面.html',
+    content: html,
+    kind: 'html',
+    requestId,
+  });
+  assert.equal(imported.status, 201);
+  const importedPayload = await imported.json();
+  assert.equal(importedPayload.doc.kind, 'html');
+  assert.equal(importedPayload.doc.name, '分享页面.html');
+
+  const saved = await store.getDocument(account.user.id, importedPayload.doc.id);
+  assert.equal(saved.kind, 'html');
+  assert.equal(saved.html, html);
+  assert.equal(saved.markdown, undefined);
+
+  const meta = await apiFetch(`/api/documents/${importedPayload.doc.id}`, auth);
+  assert.equal(meta.status, 200);
+  const metaPayload = await meta.json();
+  assert.equal(metaPayload.doc.kind, 'html');
+  assert.ok(metaPayload.doc.previewUrl.startsWith(`/api/documents/${importedPayload.doc.id}/preview`));
+  assert.equal(metaPayload.doc.html, undefined, 'raw HTML must not travel in document JSON');
+  assert.equal(metaPayload.doc.markdown, undefined);
+
+  const anonymousPreview = await fetch(`${base}${metaPayload.doc.previewUrl}`);
+  assert.equal(anonymousPreview.status, 401);
+  const tokenPreview = await fetch(`${base}${metaPayload.doc.previewUrl}`, {
+    headers: { Authorization: `Bearer ${issued.token}` },
+  });
+  assert.equal(tokenPreview.status, 401, 'import token cannot read previews');
+
+  const preview = await fetch(`${base}${metaPayload.doc.previewUrl}`, {
+    headers: { Cookie: auth.cookie },
+  });
+  assert.equal(preview.status, 200);
+  assert.match(preview.headers.get('content-type'), /^text\/html/);
+  const csp = preview.headers.get('content-security-policy');
+  assert.match(csp, /sandbox allow-scripts/);
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /frame-ancestors 'self'/);
+  const previewBody = Buffer.from(await preview.arrayBuffer()).toString('utf8');
+  assert.ok(previewBody.startsWith(html), 'raw HTML source must be preserved');
+  assert.match(previewBody, /modu-preview-ready/);
+
+  // Session + CSRF imports use the same HTML path.
+  const sessionImport = await importWithSession(auth, { name: '会话页面', content: html });
+  assert.equal(sessionImport.status, 201);
+  const sessionPayload = await sessionImport.json();
+  assert.equal(sessionPayload.doc.kind, 'html');
+  assert.equal(sessionPayload.doc.name, '会话页面.html');
+  assert.equal((await store.getDocument(account.user.id, sessionPayload.doc.id)).html, html);
+});
+
+test('HTML import preserves explicit suffixes and detects only complete HTML for lost names', async () => {
+  const account = await store.addUser('shared-kinds', 'share kind password');
+  const auth = await session('shared-kinds', 'share kind password');
+  const issued = await issueImportToken(auth);
+  const html = '<!doctype html><html><body><p>kind</p></body></html>';
+  const markdown = '# 标题\n\n<div>inline html</div>\n\n```html\n<!doctype html><html></html>\n```\n';
+  const cases = [
+    ['页面.html', html, 'html', '页面.html'],
+    ['页面.htm', html, 'html', '页面.htm'],
+    ['页面.md', html, 'markdown', '页面.md'],
+    ['页面.markdown', html, 'markdown', '页面.markdown'],
+    ['页面', html, 'html', '页面.html'],
+    ['页面.txt', html, 'html', '页面.html'],
+    ['页面.html.txt', html, 'html', '页面.html'],
+    ['页面', markdown, 'markdown', '页面.md'],
+    ['页面.txt', markdown, 'markdown', '页面.md'],
+    ['页面', '<script>alert(1)</script>', 'markdown', '页面.md'],
+    ['页面', '<html><body>not closed</body>', 'markdown', '页面.md'],
+    ['页面', '<!-- lead -->\n  <html><body>closed</body></html>', 'html', '页面.html'],
+    ['页面', '\uFEFF\n<!-- lead -->\n<!DOCTYPE HTML><p>doctype</p>', 'html', '页面.html'],
+  ];
+  for (const [name, content, expectedKind, expectedName] of cases) {
+    const response = await importFetch(issued.token, { name, content });
+    assert.equal(response.status, 201, `${name}: ${content.slice(0, 24)}`);
+    const payload = await response.json();
+    assert.equal(payload.doc.kind, expectedKind, name);
+    assert.equal(payload.doc.name, expectedName, name);
+    const saved = await store.getDocument(account.user.id, payload.doc.id);
+    assert.equal(saved.kind, expectedKind, name);
+    if (expectedKind === 'html') assert.equal(saved.html, content, name);
+    else assert.equal(saved.markdown, content, name);
+  }
+
+  // The legacy `markdown` field is still classified by an explicit suffix.
+  const legacyHtml = await importFetch(issued.token, { name: '旧快捷指令.html', markdown: html });
+  assert.equal(legacyHtml.status, 201);
+  assert.equal((await legacyHtml.json()).doc.kind, 'html');
+  const legacyMd = await importFetch(issued.token, { name: '旧快捷指令.md', markdown: html });
+  assert.equal(legacyMd.status, 201);
+  const legacyMdPayload = await legacyMd.json();
+  assert.equal(legacyMdPayload.doc.kind, 'markdown');
+  assert.equal((await store.getDocument(account.user.id, legacyMdPayload.doc.id)).markdown, html);
+});
+
+test('HTML import rejects ambiguous or invalid input and keeps idempotency kind-safe', async () => {
+  const account = await store.addUser('shared-html-id', 'share html id password');
+  const auth = await session('shared-html-id', 'share html id password');
+  const issued = await issueImportToken(auth);
+  const html = '<!doctype html><html><body>idempotent</body></html>';
+
+  const rejections = [
+    [{ name: 'x.pdf', content: '<!doctype html>' }, 415, 'UNSUPPORTED_TYPE'],
+    [{ name: 'x.docx', content: '# x' }, 415, 'UNSUPPORTED_TYPE'],
+    [{ name: '../x.html', content: html }, 400, 'INVALID_NAME'],
+    [{ name: 'dir/x.html', content: html }, 400, 'INVALID_NAME'],
+    [{ name: 'bad\u0000.html', content: html }, 400, 'INVALID_NAME'],
+    [{ name: 'x.html', content: 'a\u0000b' }, 400, 'INVALID_HTML'],
+    [{ name: 'x.txt', content: 'a\u0000b' }, 400, 'INVALID_MARKDOWN'],
+    [{ name: 'x', content: 'x'.repeat(4097) }, 413, 'DOCUMENT_TOO_LARGE'],
+    [{ name: 'x', content: html, markdown: html }, 400, 'AMBIGUOUS_CONTENT'],
+    [{ name: 'x', content: html, kind: 'text' }, 400, 'INVALID_KIND'],
+    [{ name: 'x.md', content: '# x', kind: 'html' }, 400, 'KIND_CONFLICT'],
+    [{ name: 'x.html', content: html, kind: 'markdown' }, 400, 'KIND_CONFLICT'],
+    [{ name: 'x.txt', content: html, kind: 'markdown' }, 400, 'KIND_CONFLICT'],
+    [{ name: 'x.txt', content: '# x', kind: 'html' }, 400, 'KIND_CONFLICT'],
+    [{ name: 'x', content: '<div>fragment</div>', kind: 'html' }, 400, 'KIND_CONFLICT'],
+  ];
+  for (const [body, status, code] of rejections) {
+    const response = await importFetch(issued.token, body);
+    assert.equal(response.status, status, `${body.name}: ${code}`);
+    assert.equal((await response.json()).error.code, code, body.name);
+  }
+
+  const requestId = 'a'.repeat(32);
+  const first = await importFetch(issued.token, { name: '页面', content: html, requestId });
+  assert.equal(first.status, 201);
+  const firstPayload = await first.json();
+  assert.equal(firstPayload.doc.kind, 'html');
+
+  // The legacy field and the explicit suffix must replay the same HTML hash.
+  const replay = await importFetch(issued.token, {
+    name: '页面.html',
+    markdown: html,
+    requestId,
+  });
+  assert.equal(replay.status, 200);
+  const replayPayload = await replay.json();
+  assert.equal(replayPayload.replayed, true);
+  assert.equal(replayPayload.doc.id, firstPayload.doc.id);
+  assert.equal(replayPayload.doc.kind, 'html');
+
+  const conflict = await importFetch(issued.token, {
+    name: '页面',
+    content: html.replace('idempotent', 'different'),
+    requestId,
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error.code, 'IMPORT_CONFLICT');
+
+  const untouched = await store.getDocument(account.user.id, firstPayload.doc.id);
+  assert.equal(untouched.revision, 1, 'replay must not overwrite the stored revision');
+  assert.equal(untouched.html, html);
+
+  // New `content` and legacy `markdown` requests share the old Markdown hash.
+  const mdRequestId = 'b'.repeat(32);
+  const markdown = '# old hash\n';
+  const oldFirst = await importFetch(issued.token, { name: '旧哈希', markdown, requestId: mdRequestId });
+  assert.equal(oldFirst.status, 201);
+  const oldFirstPayload = await oldFirst.json();
+  const mdReplay = await importFetch(issued.token, { name: '旧哈希.md', content: markdown, requestId: mdRequestId });
+  assert.equal(mdReplay.status, 200);
+  const mdReplayPayload = await mdReplay.json();
+  assert.equal(mdReplayPayload.replayed, true);
+  assert.equal(mdReplayPayload.doc.id, oldFirstPayload.doc.id);
+  assert.equal(mdReplayPayload.doc.kind, 'markdown');
 });

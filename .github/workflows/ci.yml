@@ -31,3 +31,6 @@ jobs:
 
       - name: Run core tests
         run: npm test
+
+      - name: Check Apple Shortcut condition format
+        run: python3 test/shortcut-format.test.py

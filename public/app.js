@@ -2092,8 +2092,12 @@ function renderCloudOnlineDocs() {
     row.className = 'cloud-online-item';
     const info = document.createElement('div');
     info.className = 'cloud-online-info';
-    const name = document.createElement('span');
+    const name = document.createElement('a');
     name.className = 'cloud-online-name';
+    name.href = `${(state.cloud.state?.serverUrl || '').replace(/\/$/, '')}/#doc-${encodeURIComponent(doc.id)}`;
+    name.target = '_blank';
+    name.rel = 'noopener noreferrer';
+    name.setAttribute('aria-label', `在浏览器中阅读 ${doc.name}`);
     name.textContent = doc.name;
     name.title = doc.name;
     const meta = document.createElement('span');

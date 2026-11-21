@@ -8,8 +8,11 @@ import {
   assertValidPassword,
   constantTimeEqual,
   assertValidUsername,
+  hashImportToken,
   hashPassword,
   hashSyncToken,
+  importTokenUserId,
+  makeImportToken,
   normalizeUsername,
   randomId,
   randomToken,
@@ -18,7 +21,12 @@ import {
 } from './auth.js';
 
 const USERS_FILE = 'users.json';
+const IMPORT_TOKENS_DIR = 'import-tokens';
+const IMPORT_MAPS_DIR = 'imports';
 const MAX_DOCS_PER_USER = 500;
+const MAX_IMPORT_REQUESTS = 2000;
+const IMPORT_REQUEST_ID_RE = /^[a-f0-9]{32}$/;
+const IMPORT_EXTENSION_RE = /\.(?:md|markdown)$/i;
 const LIBRARY_VERSION = 1;
 const MAX_FOLDERS_PER_USER = 200;
 const MAX_FOLDER_DEPTH = 8;
@@ -150,6 +158,55 @@ function normalizedMetaKind(meta) {
   return kindFromName(meta?.name);
 }
 
+/**
+ * Split an import name into the kind its suffix declares (if any) and the
+ * normalized base name. `.txt` is deliberately not a kind declaration: the
+ * caller decides from the body, or the name is converted to `.html`/`.md`.
+ */
+function importNameParts(name) {
+  if (/\.html?$/i.test(name)) return { kind: 'html', name };
+  if (IMPORT_EXTENSION_RE.test(name)) return { kind: 'markdown', name };
+  if (/\.txt$/i.test(name)) {
+    const base = name.slice(0, -4);
+    if (/\.html?$/i.test(base)) return { kind: 'html', name: base };
+    if (IMPORT_EXTENSION_RE.test(base)) return { kind: 'markdown', name: base };
+    return { kind: null, name: base };
+  }
+  if (!path.extname(name)) return { kind: null, name };
+  throw new CloudError(
+    'UNSUPPORTED_TYPE',
+    '请选择 Markdown、HTML 或纯文本文件，不支持此文件后缀。',
+    415,
+  );
+}
+
+/**
+ * Treat a body as HTML only when it is an HTML document, not merely Markdown
+ * that happens to contain HTML or a script snippet. Leading BOM/whitespace and
+ * comments are allowed; a doctype or an html root with its closing tag is
+ * required.
+ */
+function looksLikeCompleteHtmlDocument(value) {
+  if (typeof value !== 'string') return false;
+  let index = value.charCodeAt(0) === 0xfeff ? 1 : 0;
+  while (index < value.length) {
+    if (/\s/.test(value[index])) {
+      index += 1;
+      continue;
+    }
+    if (value.startsWith('<!--', index)) {
+      const end = value.indexOf('-->', index + 4);
+      if (end === -1) return false;
+      index = end + 3;
+      continue;
+    }
+    break;
+  }
+  const source = value.slice(index);
+  if (/^<!doctype\s+html(?:\s[^>]*)?>/i.test(source)) return true;
+  return /^<html(?:\s[^>]*)?>/i.test(source) && /<\/html\s*>/i.test(source);
+}
+
 function publicUser(user) {
   return {
     id: user.id,
@@ -158,6 +215,21 @@ function publicUser(user) {
     createdAt: user.createdAt,
     syncTokenRotatedAt: user.syncTokenRotatedAt || null,
   };
+}
+
+function publicImportTokenInfo(record, { valid = false } = {}) {
+  if (!record) return { configured: false, valid: false, tokenInfo: null };
+  const tokenInfo = {
+    configured: true,
+    valid: Boolean(valid),
+    createdAt: record.createdAt || null,
+    rotatedAt: record.rotatedAt || null,
+  };
+  return { configured: true, valid: Boolean(valid), tokenInfo };
+}
+
+function userIsDisabled(user) {
+  return Boolean(user?.disabled) || Boolean(user?.disabledAt) || user?.active === false;
 }
 
 function mapFsError(error, code = 'STORAGE_ERROR') {
@@ -201,12 +273,15 @@ export class CloudStore {
     this.dataDir = path.resolve(dataDir);
     this.docsDir = path.join(this.dataDir, 'docs');
     this.librariesDir = path.join(this.dataDir, 'libraries');
+    this.importTokensDir = path.join(this.dataDir, IMPORT_TOKENS_DIR);
+    this.importMapsDir = path.join(this.dataDir, IMPORT_MAPS_DIR);
     this.usersFile = path.join(this.dataDir, USERS_FILE);
     this.maxDocBytes = maxDocBytes;
     this.usersCache = null;
     this.usersMtimeMs = -1;
     this.docLocks = new Map();
     this.libraryLocks = new Map();
+    this.importLocks = new Map();
   }
 
   /**
@@ -251,11 +326,37 @@ export class CloudStore {
     }
   }
 
+  /**
+   * Import idempotency maps and per-user import tokens are separate from
+   * users.json and document metadata. Serialize every read-change-write for one
+   * user so two quick Shortcut retries cannot create two mappings or race a
+   * token rotation against an import.
+   */
+  async _withImportLock(userId, task) {
+    const key = userId;
+    const previous = this.importLocks.get(key) || Promise.resolve();
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const tail = previous.then(() => gate);
+    this.importLocks.set(key, tail);
+    await previous.catch(() => {});
+    try {
+      return await task();
+    } finally {
+      release();
+      if (this.importLocks.get(key) === tail) this.importLocks.delete(key);
+    }
+  }
+
   async init() {
     await fsp.mkdir(this.dataDir, { recursive: true, mode: 0o700 });
     await fsp.chmod(this.dataDir, 0o700).catch(() => {});
     await fsp.mkdir(this.docsDir, { recursive: true, mode: 0o700 });
     await fsp.chmod(this.docsDir, 0o700).catch(() => {});
+    await fsp.mkdir(this.importTokensDir, { recursive: true, mode: 0o700 });
+    await fsp.chmod(this.importTokensDir, 0o700).catch(() => {});
+    await fsp.mkdir(this.importMapsDir, { recursive: true, mode: 0o700 });
+    await fsp.chmod(this.importMapsDir, 0o700).catch(() => {});
     const users = await this._loadUsers();
     if (!fs.existsSync(this.usersFile)) {
       await this._persistUsers(users);
@@ -370,6 +471,334 @@ export class CloudStore {
     user.syncTokenRotatedAt = new Date().toISOString();
     await this._persistUsers(data);
     return { user: publicUser(user), syncToken };
+  }
+
+  /* --------------------------------------------------- import-only tokens */
+
+  _importTokenPath(userId) {
+    if (!USER_ID_RE.test(String(userId || ''))) {
+      throw new CloudError('USER_NOT_FOUND', '用户不存在。', 404);
+    }
+    return path.join(this.importTokensDir, `${userId}.json`);
+  }
+
+  async _readImportTokenRecord(userId) {
+    const file = this._importTokenPath(userId);
+    let raw;
+    try {
+      raw = await fsp.readFile(file, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw mapFsError(error);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new CloudError('IMPORT_TOKEN_CORRUPT', '仅导入令牌文件损坏。', 500);
+    }
+    if (
+      !isPlainObject(parsed)
+      || parsed.version !== 1
+      || parsed.userId !== userId
+      || typeof parsed.tokenHash !== 'string'
+      || !/^[a-f0-9]{64}$/.test(parsed.tokenHash)
+      || typeof parsed.authVersion !== 'string'
+    ) {
+      throw new CloudError('IMPORT_TOKEN_CORRUPT', '仅导入令牌文件格式不正确。', 500);
+    }
+    return parsed;
+  }
+
+  async _currentUserRecord(userId) {
+    const { users } = await this._loadUsers({ force: true });
+    return users.find((entry) => entry.id === userId) || null;
+  }
+
+  async getImportTokenInfo(userId) {
+    const record = await this._readImportTokenRecord(userId);
+    if (!record) return publicImportTokenInfo(null);
+    const user = await this._currentUserRecord(userId);
+    const valid = Boolean(
+      user
+      && !userIsDisabled(user)
+      && String(user.authVersion || '0') === record.authVersion,
+    );
+    return publicImportTokenInfo(record, { valid });
+  }
+
+  async issueImportToken(userId) {
+    return this._withImportLock(userId, async () => {
+      const user = await this._currentUserRecord(userId);
+      if (!user) throw new CloudError('USER_NOT_FOUND', '用户不存在。', 404);
+      if (userIsDisabled(user)) {
+        throw new CloudError('ACCOUNT_DISABLED', '账户已被禁用。', 403);
+      }
+      const existing = await this._readImportTokenRecord(userId);
+      const token = makeImportToken(userId);
+      const now = new Date().toISOString();
+      const record = {
+        version: 1,
+        userId,
+        tokenHash: hashImportToken(token),
+        authVersion: String(user.authVersion || '0'),
+        createdAt: existing?.createdAt || now,
+        rotatedAt: now,
+      };
+      // Hash-only, atomic, 0600. The clear token exists only in this return
+      // value and in the immediate HTTP response.
+      await atomicWriteFile(
+        this._importTokenPath(userId),
+        `${JSON.stringify(record, null, 2)}\n`,
+        0o600,
+      );
+      return { token, ...publicImportTokenInfo(record, { valid: true }) };
+    });
+  }
+
+  async revokeImportToken(userId) {
+    return this._withImportLock(userId, async () => {
+      await fsp.rm(this._importTokenPath(userId), { force: true });
+      return publicImportTokenInfo(null);
+    });
+  }
+
+  async verifyImportToken(token) {
+    const userId = importTokenUserId(token);
+    if (!userId) return null;
+    let record;
+    try {
+      record = await this._readImportTokenRecord(userId);
+    } catch {
+      // A corrupt token file must fail closed, never become a wildcard.
+      return null;
+    }
+    if (!record || record.userId !== userId) return null;
+    if (!constantTimeEqual(record.tokenHash, hashImportToken(token))) return null;
+    const user = await this._currentUserRecord(userId);
+    if (!user || userIsDisabled(user)) return null;
+    // Password reset rotates authVersion. The import token is intentionally
+    // invalidated with every older login session.
+    if (String(user.authVersion || '0') !== record.authVersion) return null;
+    return publicUser(user);
+  }
+
+  /* ------------------------------------------------------ import documents */
+
+  _importMapPath(userId) {
+    if (!USER_ID_RE.test(String(userId || ''))) {
+      throw new CloudError('USER_NOT_FOUND', '用户不存在。', 404);
+    }
+    return path.join(this.importMapsDir, `${userId}.json`);
+  }
+
+  async _readImportMap(userId) {
+    const file = this._importMapPath(userId);
+    let raw;
+    try {
+      raw = await fsp.readFile(file, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') return { version: 1, userId, entries: {} };
+      throw mapFsError(error);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new CloudError('IMPORT_INDEX_CORRUPT', '导入幂等记录损坏。', 500);
+    }
+    if (
+      !isPlainObject(parsed)
+      || parsed.version !== 1
+      || parsed.userId !== userId
+      || !isPlainObject(parsed.entries)
+    ) {
+      throw new CloudError('IMPORT_INDEX_CORRUPT', '导入幂等记录格式不正确。', 500);
+    }
+    return parsed;
+  }
+
+  _pruneImportMap(map) {
+    const entries = Object.entries(map.entries);
+    if (entries.length <= MAX_IMPORT_REQUESTS) return;
+    entries
+      .sort((left, right) => String(left[1].createdAt || '').localeCompare(String(right[1].createdAt || '')))
+      .slice(0, entries.length - MAX_IMPORT_REQUESTS)
+      .forEach(([requestId]) => delete map.entries[requestId]);
+  }
+
+  async importDocument(userId, { name, markdown, content, kind, requestId } = {}) {
+    if (typeof name !== 'string') {
+      throw new CloudError('INVALID_NAME', '文档名无效。', 400);
+    }
+    let docName = name.trim();
+    if (
+      !docName
+      || docName === '.' || docName === '..'
+      || docName.length > 200
+      || /[/\\\u0000-\u001f\u007f]/.test(docName)
+    ) {
+      throw new CloudError('INVALID_NAME', '文档名无效。', 400);
+    }
+
+    // Share sheets may supply a basename or a plain-text filename. Only a
+    // suffix declares the kind; `.txt`/no-extension names are decided below.
+    const nameParts = importNameParts(docName);
+    docName = nameParts.name;
+
+    let requestedKind = null;
+    if (kind !== undefined && kind !== null) {
+      if (typeof kind !== 'string' || !DOC_KINDS.has(kind)) {
+        throw new CloudError('INVALID_KIND', 'kind 只能是 markdown 或 html。', 400);
+      }
+      requestedKind = kind;
+    }
+    if (nameParts.kind && requestedKind && nameParts.kind !== requestedKind) {
+      throw new CloudError('KIND_CONFLICT', 'kind 与文件名扩展名不一致。', 400);
+    }
+
+    // Accept both the legacy `markdown` field and the newer `content` field,
+    // but never guess when a caller supplies two bodies.
+    const hasMarkdown = markdown !== undefined && markdown !== null;
+    const hasContent = content !== undefined && content !== null;
+    if (hasMarkdown && hasContent) {
+      throw new CloudError('AMBIGUOUS_CONTENT', 'markdown 与 content 只能提交一个。', 400);
+    }
+    const rawContent = hasContent ? content : markdown;
+    const expectedKind = nameParts.kind || requestedKind || 'markdown';
+    if (typeof rawContent !== 'string') {
+      throw new CloudError(
+        expectedKind === 'html' ? 'INVALID_HTML' : 'INVALID_MARKDOWN',
+        expectedKind === 'html' ? '缺少 HTML 正文。' : '未读取到有效的纯文本正文。',
+        400,
+      );
+    }
+    if (rawContent.includes('\u0000')) {
+      throw new CloudError(
+        expectedKind === 'html' ? 'INVALID_HTML' : 'INVALID_MARKDOWN',
+        expectedKind === 'html' ? 'HTML 正文不能包含 NUL 字符。' : '正文不能包含 NUL 字符。',
+        400,
+      );
+    }
+    const body = Buffer.from(rawContent, 'utf8');
+    if (body.length > this.maxDocBytes) {
+      throw new CloudError(
+        'DOCUMENT_TOO_LARGE',
+        `文档超过 ${(this.maxDocBytes / 1024 / 1024).toFixed(0)} MB 限制。`,
+        413,
+      );
+    }
+
+    const detectedKind = nameParts.kind === null
+      ? (looksLikeCompleteHtmlDocument(rawContent) ? 'html' : 'markdown')
+      : nameParts.kind;
+    if (nameParts.kind === null && requestedKind && requestedKind !== detectedKind) {
+      throw new CloudError('KIND_CONFLICT', 'kind 与检测到的正文类型不一致。', 400);
+    }
+    const docKind = nameParts.kind || detectedKind;
+
+    // Normalize only names whose kind had to be inferred. Explicit .html/.htm
+    // and .md/.markdown names (including .html.txt) are preserved.
+    if (docKind === 'html') {
+      if (!/\.html?$/i.test(docName)) docName += '.html';
+    } else if (!IMPORT_EXTENSION_RE.test(docName)) {
+      docName += '.md';
+    }
+    if (docName.length > 200) throw new CloudError('INVALID_NAME', '文档名过长。', 400);
+    if (docKind === 'html' && !/\.html?$/i.test(docName)) {
+      throw new CloudError('UNSUPPORTED_TYPE', 'HTML 文稿必须使用 .html 或 .htm 扩展名。', 415);
+    }
+    if (docKind === 'markdown' && !IMPORT_EXTENSION_RE.test(docName)) {
+      throw new CloudError('UNSUPPORTED_TYPE', '请选择 Markdown、HTML 或纯文本文件，不支持此文件后缀。', 415);
+    }
+
+    let idempotencyKey = '';
+    if (requestId !== undefined && requestId !== null && requestId !== '') {
+      if (typeof requestId !== 'string' || !IMPORT_REQUEST_ID_RE.test(requestId)) {
+        throw new CloudError('INVALID_REQUEST_ID', 'requestId 需为 32 位小写十六进制。', 400);
+      }
+      idempotencyKey = requestId;
+    }
+    // Keep legacy Markdown hashes byte-for-byte compatible. HTML is a new
+    // namespace, so include its canonical kind and content in the hash.
+    const payloadHash = docKind === 'html'
+      ? sha256(JSON.stringify({ name: docName, kind: 'html', content: rawContent }))
+      : sha256(JSON.stringify({ name: docName, markdown: rawContent }));
+
+    return this._withImportLock(userId, async () => {
+      const map = idempotencyKey ? await this._readImportMap(userId) : null;
+      if (idempotencyKey) {
+        const existing = map.entries[idempotencyKey];
+        if (existing) {
+          if (existing.payloadHash !== payloadHash) {
+            throw new CloudError(
+              'IMPORT_CONFLICT',
+              '同一 requestId 已用于不同内容，请使用新的 requestId。',
+              409,
+            );
+          }
+          try {
+            const meta = await this._readMeta(userId, existing.docId);
+            return {
+              replayed: true,
+              doc: {
+                id: meta.id,
+                name: meta.name,
+                kind: normalizedMetaKind(meta),
+                revision: Number(meta.revision) || 1,
+                size: Number(meta.size) || 0,
+                updatedAt: meta.updatedAt || meta.createdAt || null,
+              },
+            };
+          } catch (error) {
+            // The mapped document was removed out of band. Its id would be
+            // unsafe to reuse if metadata now exists, so create a fresh doc and
+            // replace only this requestId's mapping.
+            if (!(error instanceof CloudError) || error.code !== 'DOCUMENT_NOT_FOUND') throw error;
+          }
+        }
+      }
+
+      let docId = '';
+      for (let attempt = 0; attempt < 32; attempt += 1) {
+        const candidate = randomId(16);
+        try {
+          await this._readMeta(userId, candidate);
+        } catch (error) {
+          if (error instanceof CloudError && error.code === 'DOCUMENT_NOT_FOUND') {
+            docId = candidate;
+            break;
+          }
+          throw error;
+        }
+      }
+      if (!docId) {
+        throw new CloudError('DOCUMENT_ID_EXHAUSTED', '暂时无法生成文档标识，请重试。', 503);
+      }
+
+      const saved = await this.upsertDocument(
+        userId,
+        docId,
+        docKind === 'html'
+          ? { name: docName, kind: 'html', content: rawContent }
+          : { name: docName, kind: 'markdown', markdown: rawContent },
+        { createOnly: true },
+      );
+      if (idempotencyKey) {
+        map.entries[idempotencyKey] = {
+          docId: saved.doc.id,
+          payloadHash,
+          createdAt: new Date().toISOString(),
+        };
+        this._pruneImportMap(map);
+        await atomicWriteFile(
+          this._importMapPath(userId),
+          `${JSON.stringify(map, null, 2)}\n`,
+          0o600,
+        );
+      }
+      return { replayed: false, doc: saved.doc };
+    });
   }
 
   async resetPassword(userId, password) {
@@ -499,7 +928,7 @@ export class CloudStore {
     });
   }
 
-  async upsertDocument(userId, docId, { name, markdown, content, kind } = {}) {
+  async upsertDocument(userId, docId, { name, markdown, content, kind } = {}, { createOnly = false } = {}) {
     const docName = String(name || '')
       .replace(/[\u0000-\u001f\u007f]/g, '')
       .trim();
@@ -549,6 +978,12 @@ export class CloudStore {
         if (count >= MAX_DOCS_PER_USER) {
           throw new CloudError('LIBRARY_FULL', `每个账户最多 ${MAX_DOCS_PER_USER} 份文档。`, 413);
         }
+      }
+
+      if (previous && createOnly) {
+        // Import promises a brand-new document id. Refuse rather than turn an
+        // id collision into an overwrite of somebody's existing revision.
+        throw new CloudError('DOCUMENT_EXISTS', '文档标识已存在，请重新导入。', 409);
       }
 
       if (previous && normalizedMetaKind(previous) !== docKind) {

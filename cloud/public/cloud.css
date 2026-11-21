@@ -360,6 +360,13 @@ button { color: inherit; }
   font-size: 9.5px;
   line-height: 1.65;
 }
+.library-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 0 12px 9px max(12px, calc(12px + var(--safe-left)));
+}
 
 .library-browse {
   /* The browser is a fixed-size block, not a shrinkable flex item: when it
@@ -1146,7 +1153,8 @@ body.library-doc-dragging { cursor: grabbing; user-select: none; -webkit-user-se
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
 }
-.library-dialog {
+.library-dialog,
+.shortcut-dialog {
   width: min(430px, 100%);
   max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 28px);
   overflow-y: auto;
@@ -1224,6 +1232,55 @@ body.library-doc-dragging { cursor: grabbing; user-select: none; -webkit-user-se
 .dialog-submit.is-danger { background: var(--danger); }
 .dialog-submit.is-danger:hover { background: color-mix(in srgb, var(--danger) 82%, black); }
 .dialog-submit:disabled { opacity: 0.55; cursor: wait; }
+
+.shortcut-dialog { width: min(470px, 100%); }
+.shortcut-download {
+  display: grid;
+  place-items: center;
+  margin-top: 14px;
+  text-decoration: none;
+}
+.shortcut-download:hover { text-decoration: none; }
+.shortcut-hint {
+  margin: 8px 0 0;
+  color: var(--ink-muted);
+  font-size: 9px;
+  line-height: 1.6;
+}
+.shortcut-copy-row { display: flex; align-items: center; gap: 6px; }
+.shortcut-copy-row input { flex: 1 1 auto; min-width: 0; }
+.shortcut-copy-row .library-mini-button { flex: 0 0 auto; min-height: 38px; }
+.shortcut-token {
+  margin-top: 14px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-muted);
+}
+.shortcut-token-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-soft);
+  font-size: 9.5px;
+  font-weight: 650;
+}
+.shortcut-token-state { color: var(--ink-muted); font-size: 8.5px; font-weight: 500; }
+.shortcut-token-secret { margin-top: 9px; }
+.shortcut-token-secret label { display: block; margin-bottom: 5px; color: var(--ink-soft); font-size: 9px; font-weight: 650; }
+.shortcut-token-secret small { display: block; margin-top: 5px; color: var(--warning); font-size: 8.5px; line-height: 1.5; }
+.shortcut-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.shortcut-actions .primary-button { margin-top: 0; min-width: 96px; height: 38px; padding: 0 15px; }
+.shortcut-actions .text-button { min-height: 38px; }
+.shortcut-steps {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.shortcut-steps ol { margin: 7px 0 0; padding-left: 18px; color: var(--ink-muted); font-size: 9.5px; line-height: 1.65; }
+.shortcut-steps li + li { margin-top: 4px; }
+.shortcut-steps code { font-family: var(--font-mono); font-size: 8.5px; }
 
 /* --------------------------------------------------------------- scrim */
 
@@ -1326,7 +1383,8 @@ body.library-doc-dragging { cursor: grabbing; user-select: none; -webkit-user-se
   .library { --folder-browse-max: min(27vh, 220px); }
   .library-view-head { padding-right: 12px; }
   .dialog-layer { place-items: center; }
-  .library-dialog { width: min(430px, 100%); padding: 18px; }
+  .library-dialog,
+  .shortcut-dialog { width: min(430px, 100%); padding: 18px; }
   .reader-wrap { height: 100%; }
   .reader-rail { padding-left: 15px; padding-right: 15px; }
   .reader-alert { margin-left: 15px; margin-right: 15px; }
@@ -1355,10 +1413,15 @@ body.library-doc-dragging { cursor: grabbing; user-select: none; -webkit-user-se
   .reading-footer { min-height: 26px; padding-top: 3px; padding-bottom: 3px; }
   .reader-scroll { padding-top: 20px; padding-bottom: 34px; }
   .library-head { padding-top: 12px; padding-bottom: 6px; }
-  .library-note { margin-bottom: 8px; padding: 7px 9px; }
+  /* Short landscape cannot afford both the explanatory note and the new
+     import/shortcut tools without shrinking the document list below a usable
+     height. The tools stay reachable; the already-redundant note yields. */
+  .library-note { display: none; }
+  .library-tools { padding-bottom: 5px; }
   .library { --folder-browse-max: 101px; --folder-tree-max: 58px; }
   .library-foot { padding-top: 7px; padding-bottom: 7px; }
-  .library-dialog { max-height: calc(100dvh - 20px); padding: 15px; }
+  .library-dialog,
+  .shortcut-dialog { max-height: calc(100dvh - 20px); padding: 15px; }
   .dialog-copy { margin-top: 7px; }
   .cloud-welcome h2 { font-size: 30px; }
   .cloud-welcome { padding-top: 4px; }
