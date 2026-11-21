@@ -1967,7 +1967,7 @@ async function refreshLibrary({ quiet = false } = {}) {
 
 /* ------------------------------------------------- import / shortcut */
 
-const IMPORT_BUTTON_LABEL = '导入 Markdown';
+const IMPORT_BUTTON_LABEL = '导入文档';
 
 function isShortcutDialogOpen() {
   return Boolean(els.shortcutDialog && !els.shortcutDialog.hidden);
@@ -2003,7 +2003,7 @@ function importFileFingerprint(file) {
   return [file.name, file.size, file.lastModified || 0].join(':');
 }
 
-async function importMarkdownFile(file) {
+async function importDocumentFile(file) {
   if (!file || state.importBusy || !state.authenticated) return;
   if (!state.online) {
     showToast('当前离线，无法导入。恢复网络后重试。', 'error');
@@ -2011,8 +2011,8 @@ async function importMarkdownFile(file) {
   }
   const importName = String(file.name || '').trim();
   const extension = /\.[^./\\]*$/.exec(importName)?.[0] || '';
-  if (!importName || (extension && !/^\.(?:md|markdown|txt)$/i.test(extension))) {
-    showToast('请选择 Markdown 或纯文本文件，不支持此文件后缀。', 'error');
+  if (!importName || (extension && !/^\.(?:md|markdown|html|htm|txt)$/i.test(extension))) {
+    showToast('请选择 Markdown、HTML 或纯文本文件，不支持此文件后缀。', 'error');
     return;
   }
   const maxBytes = Number(state.maxDocBytes) || 2 * 1024 * 1024;
@@ -2033,13 +2033,13 @@ async function importMarkdownFile(file) {
   syncImportAndShortcutButtons();
 
   try {
-    const markdown = await file.text();
+    const content = await file.text();
     showToast(`正在导入 ${file.name}…`, 'info');
     const payload = await api('/api/import/documents', {
       method: 'POST',
       csrf: true,
       timeoutMs: 60_000,
-      body: { name: file.name, markdown, requestId },
+      body: { name: file.name, content, requestId },
     });
     if (authGeneration !== state.authGeneration || !state.authenticated) return;
     if (!payload?.doc?.id) {
@@ -3473,7 +3473,7 @@ function bindEvents() {
     const file = els.importFile.files?.[0] || null;
     // Clear immediately so selecting the same file again still fires change.
     els.importFile.value = '';
-    if (file) await importMarkdownFile(file);
+    if (file) await importDocumentFile(file);
   });
   els.shortcutSettings.addEventListener('click', openShortcutDialog);
   els.shortcutClose.addEventListener('click', () => closeShortcutDialog());

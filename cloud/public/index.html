@@ -152,10 +152,10 @@
             <span aria-hidden="true">×</span>
           </button>
         </div>
-        <p class="library-note">只有 Mac 上主动加入文库的 Markdown 或单文件 HTML 才会出现在这里。文件夹只整理云端文库，不移动 Mac 上的原文件。</p>
+        <p class="library-note">主动同步或导入的 Markdown 与单文件 HTML 会出现在这里。文件夹只整理云端文库，不移动 Mac 上的原文件。</p>
 
         <div class="library-tools" role="group" aria-label="导入与快捷指令">
-          <button class="library-mini-button" id="import-doc" type="button">导入 Markdown</button>
+          <button class="library-mini-button" id="import-doc" type="button">导入文档</button>
           <button class="library-mini-button" id="shortcut-settings" type="button">快捷指令</button>
           <input id="import-file" type="file" hidden>
         </div>
@@ -320,7 +320,7 @@
       </div>
 
       <p class="dialog-copy">
-        用系统分享把 Markdown 从“文件”或 Safari 导入云端文库。快捷指令使用一个只能新建文档的专用令牌，
+        用系统分享把 Markdown 或单文件 HTML 从“文件”或 Safari 导入云端文库。快捷指令使用一个只能新建文档的专用令牌，
         不能读取、整理或覆盖你已有的任何文档。
       </p>
 
@@ -367,7 +367,7 @@
         <ol>
           <li>先生成并复制仅导入令牌，再下载快捷指令。</li>
           <li>添加时填写服务网址和仅导入令牌。</li>
-          <li>在“文件”里分享一个 <code>.md</code> / <code>.markdown</code> 文件，选择这个快捷指令。</li>
+          <li>在“文件”里分享一个 <code>.md</code> / <code>.markdown</code> / <code>.html</code> / <code>.htm</code> 文件，选择这个快捷指令。</li>
         </ol>
         <p class="shortcut-hint">
           首次在 Safari 中打开你的服务地址可能需要先登录网页；快捷指令本身不会使用你的密码或 Mac 同步令牌。

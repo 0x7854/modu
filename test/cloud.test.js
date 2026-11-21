@@ -761,11 +761,188 @@ test('shared Markdown survives lost extensions and plain-text names without chan
   const replay = await importFetch(issued.token, {name:'重试.md', markdown, requestId});
   assert.equal(replay.status, 200);
   assert.equal((await replay.json()).doc.id, first.doc.id);
-  for (const name of ['file.pdf', 'file.docx', 'page.html', 'image.png']) {
+  for (const name of ['file.pdf', 'file.docx', 'image.png']) {
     assert.equal((await importFetch(issued.token, {name, markdown})).status, 415, name);
   }
   for (const name of ['.', '..', 'a'.repeat(198)]) {
     assert.equal((await importFetch(issued.token, {name, markdown})).status, 400, name);
   }
   assert.equal((await importFetch(issued.token, {name:'binary', markdown:'text\u0000binary'})).status,400);
+});
+
+test('shared HTML imports through token and session preserve source and use the sandboxed preview', async () => {
+  const account = await store.addUser('shared-html', 'share html password');
+  const auth = await session('shared-html', 'share html password');
+  const issued = await issueImportToken(auth);
+  const html = '\uFEFF  <!-- leading comment -->\n<!doctype html>\n<html lang="zh"><head><meta charset="utf-8"><style>body{margin:0}</style></head><body><h1>HTML 原文</h1><button id="counter" onclick="this.textContent=Number(this.textContent)+1">0</button><script>window.__htmlImported=true;</script></body></html>\n';
+  const requestId = '9'.repeat(32);
+
+  const imported = await importFetch(issued.token, {
+    name: '分享页面.html',
+    content: html,
+    kind: 'html',
+    requestId,
+  });
+  assert.equal(imported.status, 201);
+  const importedPayload = await imported.json();
+  assert.equal(importedPayload.doc.kind, 'html');
+  assert.equal(importedPayload.doc.name, '分享页面.html');
+
+  const saved = await store.getDocument(account.user.id, importedPayload.doc.id);
+  assert.equal(saved.kind, 'html');
+  assert.equal(saved.html, html);
+  assert.equal(saved.markdown, undefined);
+
+  const meta = await apiFetch(`/api/documents/${importedPayload.doc.id}`, auth);
+  assert.equal(meta.status, 200);
+  const metaPayload = await meta.json();
+  assert.equal(metaPayload.doc.kind, 'html');
+  assert.ok(metaPayload.doc.previewUrl.startsWith(`/api/documents/${importedPayload.doc.id}/preview`));
+  assert.equal(metaPayload.doc.html, undefined, 'raw HTML must not travel in document JSON');
+  assert.equal(metaPayload.doc.markdown, undefined);
+
+  const anonymousPreview = await fetch(`${base}${metaPayload.doc.previewUrl}`);
+  assert.equal(anonymousPreview.status, 401);
+  const tokenPreview = await fetch(`${base}${metaPayload.doc.previewUrl}`, {
+    headers: { Authorization: `Bearer ${issued.token}` },
+  });
+  assert.equal(tokenPreview.status, 401, 'import token cannot read previews');
+
+  const preview = await fetch(`${base}${metaPayload.doc.previewUrl}`, {
+    headers: { Cookie: auth.cookie },
+  });
+  assert.equal(preview.status, 200);
+  assert.match(preview.headers.get('content-type'), /^text\/html/);
+  const csp = preview.headers.get('content-security-policy');
+  assert.match(csp, /sandbox allow-scripts/);
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /frame-ancestors 'self'/);
+  const previewBody = Buffer.from(await preview.arrayBuffer()).toString('utf8');
+  assert.ok(previewBody.startsWith(html), 'raw HTML source must be preserved');
+  assert.match(previewBody, /modu-preview-ready/);
+
+  // Session + CSRF imports use the same HTML path.
+  const sessionImport = await importWithSession(auth, { name: '会话页面', content: html });
+  assert.equal(sessionImport.status, 201);
+  const sessionPayload = await sessionImport.json();
+  assert.equal(sessionPayload.doc.kind, 'html');
+  assert.equal(sessionPayload.doc.name, '会话页面.html');
+  assert.equal((await store.getDocument(account.user.id, sessionPayload.doc.id)).html, html);
+});
+
+test('HTML import preserves explicit suffixes and detects only complete HTML for lost names', async () => {
+  const account = await store.addUser('shared-kinds', 'share kind password');
+  const auth = await session('shared-kinds', 'share kind password');
+  const issued = await issueImportToken(auth);
+  const html = '<!doctype html><html><body><p>kind</p></body></html>';
+  const markdown = '# 标题\n\n<div>inline html</div>\n\n```html\n<!doctype html><html></html>\n```\n';
+  const cases = [
+    ['页面.html', html, 'html', '页面.html'],
+    ['页面.htm', html, 'html', '页面.htm'],
+    ['页面.md', html, 'markdown', '页面.md'],
+    ['页面.markdown', html, 'markdown', '页面.markdown'],
+    ['页面', html, 'html', '页面.html'],
+    ['页面.txt', html, 'html', '页面.html'],
+    ['页面.html.txt', html, 'html', '页面.html'],
+    ['页面', markdown, 'markdown', '页面.md'],
+    ['页面.txt', markdown, 'markdown', '页面.md'],
+    ['页面', '<script>alert(1)</script>', 'markdown', '页面.md'],
+    ['页面', '<html><body>not closed</body>', 'markdown', '页面.md'],
+    ['页面', '<!-- lead -->\n  <html><body>closed</body></html>', 'html', '页面.html'],
+    ['页面', '\uFEFF\n<!-- lead -->\n<!DOCTYPE HTML><p>doctype</p>', 'html', '页面.html'],
+  ];
+  for (const [name, content, expectedKind, expectedName] of cases) {
+    const response = await importFetch(issued.token, { name, content });
+    assert.equal(response.status, 201, `${name}: ${content.slice(0, 24)}`);
+    const payload = await response.json();
+    assert.equal(payload.doc.kind, expectedKind, name);
+    assert.equal(payload.doc.name, expectedName, name);
+    const saved = await store.getDocument(account.user.id, payload.doc.id);
+    assert.equal(saved.kind, expectedKind, name);
+    if (expectedKind === 'html') assert.equal(saved.html, content, name);
+    else assert.equal(saved.markdown, content, name);
+  }
+
+  // The legacy `markdown` field is still classified by an explicit suffix.
+  const legacyHtml = await importFetch(issued.token, { name: '旧快捷指令.html', markdown: html });
+  assert.equal(legacyHtml.status, 201);
+  assert.equal((await legacyHtml.json()).doc.kind, 'html');
+  const legacyMd = await importFetch(issued.token, { name: '旧快捷指令.md', markdown: html });
+  assert.equal(legacyMd.status, 201);
+  const legacyMdPayload = await legacyMd.json();
+  assert.equal(legacyMdPayload.doc.kind, 'markdown');
+  assert.equal((await store.getDocument(account.user.id, legacyMdPayload.doc.id)).markdown, html);
+});
+
+test('HTML import rejects ambiguous or invalid input and keeps idempotency kind-safe', async () => {
+  const account = await store.addUser('shared-html-id', 'share html id password');
+  const auth = await session('shared-html-id', 'share html id password');
+  const issued = await issueImportToken(auth);
+  const html = '<!doctype html><html><body>idempotent</body></html>';
+
+  const rejections = [
+    [{ name: 'x.pdf', content: '<!doctype html>' }, 415, 'UNSUPPORTED_TYPE'],
+    [{ name: 'x.docx', content: '# x' }, 415, 'UNSUPPORTED_TYPE'],
+    [{ name: '../x.html', content: html }, 400, 'INVALID_NAME'],
+    [{ name: 'dir/x.html', content: html }, 400, 'INVALID_NAME'],
+    [{ name: 'bad\u0000.html', content: html }, 400, 'INVALID_NAME'],
+    [{ name: 'x.html', content: 'a\u0000b' }, 400, 'INVALID_HTML'],
+    [{ name: 'x.txt', content: 'a\u0000b' }, 400, 'INVALID_MARKDOWN'],
+    [{ name: 'x', content: 'x'.repeat(4097) }, 413, 'DOCUMENT_TOO_LARGE'],
+    [{ name: 'x', content: html, markdown: html }, 400, 'AMBIGUOUS_CONTENT'],
+    [{ name: 'x', content: html, kind: 'text' }, 400, 'INVALID_KIND'],
+    [{ name: 'x.md', content: '# x', kind: 'html' }, 400, 'KIND_CONFLICT'],
+    [{ name: 'x.html', content: html, kind: 'markdown' }, 400, 'KIND_CONFLICT'],
+    [{ name: 'x.txt', content: html, kind: 'markdown' }, 400, 'KIND_CONFLICT'],
+    [{ name: 'x.txt', content: '# x', kind: 'html' }, 400, 'KIND_CONFLICT'],
+    [{ name: 'x', content: '<div>fragment</div>', kind: 'html' }, 400, 'KIND_CONFLICT'],
+  ];
+  for (const [body, status, code] of rejections) {
+    const response = await importFetch(issued.token, body);
+    assert.equal(response.status, status, `${body.name}: ${code}`);
+    assert.equal((await response.json()).error.code, code, body.name);
+  }
+
+  const requestId = 'a'.repeat(32);
+  const first = await importFetch(issued.token, { name: '页面', content: html, requestId });
+  assert.equal(first.status, 201);
+  const firstPayload = await first.json();
+  assert.equal(firstPayload.doc.kind, 'html');
+
+  // The legacy field and the explicit suffix must replay the same HTML hash.
+  const replay = await importFetch(issued.token, {
+    name: '页面.html',
+    markdown: html,
+    requestId,
+  });
+  assert.equal(replay.status, 200);
+  const replayPayload = await replay.json();
+  assert.equal(replayPayload.replayed, true);
+  assert.equal(replayPayload.doc.id, firstPayload.doc.id);
+  assert.equal(replayPayload.doc.kind, 'html');
+
+  const conflict = await importFetch(issued.token, {
+    name: '页面',
+    content: html.replace('idempotent', 'different'),
+    requestId,
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error.code, 'IMPORT_CONFLICT');
+
+  const untouched = await store.getDocument(account.user.id, firstPayload.doc.id);
+  assert.equal(untouched.revision, 1, 'replay must not overwrite the stored revision');
+  assert.equal(untouched.html, html);
+
+  // New `content` and legacy `markdown` requests share the old Markdown hash.
+  const mdRequestId = 'b'.repeat(32);
+  const markdown = '# old hash\n';
+  const oldFirst = await importFetch(issued.token, { name: '旧哈希', markdown, requestId: mdRequestId });
+  assert.equal(oldFirst.status, 201);
+  const oldFirstPayload = await oldFirst.json();
+  const mdReplay = await importFetch(issued.token, { name: '旧哈希.md', content: markdown, requestId: mdRequestId });
+  assert.equal(mdReplay.status, 200);
+  const mdReplayPayload = await mdReplay.json();
+  assert.equal(mdReplayPayload.replayed, true);
+  assert.equal(mdReplayPayload.doc.id, oldFirstPayload.doc.id);
+  assert.equal(mdReplayPayload.doc.kind, 'markdown');
 });

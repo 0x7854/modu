@@ -249,6 +249,8 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
   timeout: 120000,
 }, async () => {
   const mobile = await browser.newContext({
+    // page.route cannot intercept service-worker handled requests; SW upgrades are tested separately.
+    serviceWorkers: 'block',
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
     hasTouch: true,
@@ -279,7 +281,7 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
       mimeType: 'text/plain',
       buffer: Buffer.from('not markdown'),
     });
-    await mobilePage.getByText('请选择 Markdown 或纯文本文件，不支持此文件后缀。').waitFor({ timeout: 5000 });
+    await mobilePage.getByText('请选择 Markdown、HTML 或纯文本文件，不支持此文件后缀。').waitFor({ timeout: 5000 });
     assert.equal(await mobilePage.locator('#doc-list [data-doc-id]').count(), beforeCount);
 
     await mobilePage.locator('#import-file').setInputFiles({
@@ -330,6 +332,28 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
     }
 
 
+    // File imports must retain HTML source and use the sandbox renderer.
+    for (const name of ['飞书页面.html', '飞书页面.htm', '飞书页面', '飞书页面.txt', '飞书页面.html.txt']) {
+      const content = '<!doctype html><html><body><button id="import-counter" onclick="this.textContent=Number(this.textContent)+1">0</button></body></html>';
+      await mobilePage.locator('#library-toggle').click();
+      const previousHash = await mobilePage.evaluate(() => location.hash);
+      await mobilePage.locator('#import-file').setInputFiles({ name, mimeType: 'text/html', buffer: Buffer.from(content) });
+      await mobilePage.waitForFunction(previous => location.hash !== previous, previousHash);
+      const counter = mobilePage.frameLocator('#html-frame').locator('#import-counter');
+      await counter.waitFor();
+      await mobilePage.locator('#doc-loading').waitFor({state: 'hidden'});
+      await counter.click();
+      await counter.filter({hasText: /^1$/}).waitFor();
+      assert.equal(await counter.textContent(), '1');
+      const id = await mobilePage.evaluate(() => location.hash.slice(5));
+      const saved = await store.getDocument(aliceUserId, id);
+      assert.equal(saved.kind, 'html');
+      assert.equal(saved.html, content);
+      assert.equal(await mobilePage.locator('#html-frame').getAttribute('sandbox'), 'allow-scripts');
+      await mobilePage.locator('#doc-loading').waitFor({state: 'hidden'});
+      await mobilePage.waitForFunction(() => !document.querySelector('#import-doc').disabled);
+    }
+
     // A lost network request must surface an error and must not leave the import
     // button stuck in its loading state.
     await mobilePage.route('**/api/import/documents', (route) => route.abort('failed'));
@@ -342,7 +366,7 @@ test(`mobile import UI ${browserKind}: file import, same-name docs, invalid file
     });
     await mobilePage.getByText('网络连接失败，请稍后重试。').waitFor({ timeout: 10000 });
     await mobilePage.unroute('**/api/import/documents');
-    assert.equal(await mobilePage.locator('#import-doc').textContent(), '导入 Markdown');
+    assert.equal(await mobilePage.locator('#import-doc').textContent(), '导入文档');
 
     await mobilePage.evaluate(() => {
       window.sharedFiles = [];

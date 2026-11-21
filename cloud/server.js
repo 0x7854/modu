@@ -444,6 +444,8 @@ export async function createCloudServer(options = {}) {
     const result = await store.importDocument(user.id, {
       name: body.name,
       markdown: body.markdown,
+      content: body.content,
+      kind: body.kind,
       requestId: body.requestId,
     });
     sendJson(res, result.replayed ? 200 : 201, {

@@ -158,6 +158,55 @@ function normalizedMetaKind(meta) {
   return kindFromName(meta?.name);
 }
 
+/**
+ * Split an import name into the kind its suffix declares (if any) and the
+ * normalized base name. `.txt` is deliberately not a kind declaration: the
+ * caller decides from the body, or the name is converted to `.html`/`.md`.
+ */
+function importNameParts(name) {
+  if (/\.html?$/i.test(name)) return { kind: 'html', name };
+  if (IMPORT_EXTENSION_RE.test(name)) return { kind: 'markdown', name };
+  if (/\.txt$/i.test(name)) {
+    const base = name.slice(0, -4);
+    if (/\.html?$/i.test(base)) return { kind: 'html', name: base };
+    if (IMPORT_EXTENSION_RE.test(base)) return { kind: 'markdown', name: base };
+    return { kind: null, name: base };
+  }
+  if (!path.extname(name)) return { kind: null, name };
+  throw new CloudError(
+    'UNSUPPORTED_TYPE',
+    '请选择 Markdown、HTML 或纯文本文件，不支持此文件后缀。',
+    415,
+  );
+}
+
+/**
+ * Treat a body as HTML only when it is an HTML document, not merely Markdown
+ * that happens to contain HTML or a script snippet. Leading BOM/whitespace and
+ * comments are allowed; a doctype or an html root with its closing tag is
+ * required.
+ */
+function looksLikeCompleteHtmlDocument(value) {
+  if (typeof value !== 'string') return false;
+  let index = value.charCodeAt(0) === 0xfeff ? 1 : 0;
+  while (index < value.length) {
+    if (/\s/.test(value[index])) {
+      index += 1;
+      continue;
+    }
+    if (value.startsWith('<!--', index)) {
+      const end = value.indexOf('-->', index + 4);
+      if (end === -1) return false;
+      index = end + 3;
+      continue;
+    }
+    break;
+  }
+  const source = value.slice(index);
+  if (/^<!doctype\s+html(?:\s[^>]*)?>/i.test(source)) return true;
+  return /^<html(?:\s[^>]*)?>/i.test(source) && /<\/html\s*>/i.test(source);
+}
+
 function publicUser(user) {
   return {
     id: user.id,
@@ -578,7 +627,7 @@ export class CloudStore {
       .forEach(([requestId]) => delete map.entries[requestId]);
   }
 
-  async importDocument(userId, { name, markdown, requestId } = {}) {
+  async importDocument(userId, { name, markdown, content, kind, requestId } = {}) {
     if (typeof name !== 'string') {
       throw new CloudError('INVALID_NAME', '文档名无效。', 400);
     }
@@ -591,27 +640,78 @@ export class CloudStore {
     ) {
       throw new CloudError('INVALID_NAME', '文档名无效。', 400);
     }
-    // Share sheets may supply a basename or a plain-text filename for MD.
-    // Normalize only these textual names; never overwrite an existing file.
-    if (!IMPORT_EXTENSION_RE.test(docName) && !path.extname(docName)) docName += '.md';
-    else if (/\.txt$/i.test(docName)) {
-      docName = docName.slice(0, -4);
-      if (!IMPORT_EXTENSION_RE.test(docName)) docName += '.md';
+
+    // Share sheets may supply a basename or a plain-text filename. Only a
+    // suffix declares the kind; `.txt`/no-extension names are decided below.
+    const nameParts = importNameParts(docName);
+    docName = nameParts.name;
+
+    let requestedKind = null;
+    if (kind !== undefined && kind !== null) {
+      if (typeof kind !== 'string' || !DOC_KINDS.has(kind)) {
+        throw new CloudError('INVALID_KIND', 'kind 只能是 markdown 或 html。', 400);
+      }
+      requestedKind = kind;
     }
-    if (docName.length > 200) throw new CloudError('INVALID_NAME', '文档名过长。', 400);
-    if (!IMPORT_EXTENSION_RE.test(docName)) {
-      throw new CloudError('UNSUPPORTED_TYPE', '请选择 Markdown 或纯文本文件，不支持此文件后缀。', 415);
+    if (nameParts.kind && requestedKind && nameParts.kind !== requestedKind) {
+      throw new CloudError('KIND_CONFLICT', 'kind 与文件名扩展名不一致。', 400);
     }
-    if (typeof markdown !== 'string' || markdown.includes('\u0000')) {
-      throw new CloudError('INVALID_MARKDOWN', '未读取到有效的纯文本正文。', 400);
+
+    // Accept both the legacy `markdown` field and the newer `content` field,
+    // but never guess when a caller supplies two bodies.
+    const hasMarkdown = markdown !== undefined && markdown !== null;
+    const hasContent = content !== undefined && content !== null;
+    if (hasMarkdown && hasContent) {
+      throw new CloudError('AMBIGUOUS_CONTENT', 'markdown 与 content 只能提交一个。', 400);
     }
-    if (Buffer.byteLength(markdown, 'utf8') > this.maxDocBytes) {
+    const rawContent = hasContent ? content : markdown;
+    const expectedKind = nameParts.kind || requestedKind || 'markdown';
+    if (typeof rawContent !== 'string') {
+      throw new CloudError(
+        expectedKind === 'html' ? 'INVALID_HTML' : 'INVALID_MARKDOWN',
+        expectedKind === 'html' ? '缺少 HTML 正文。' : '未读取到有效的纯文本正文。',
+        400,
+      );
+    }
+    if (rawContent.includes('\u0000')) {
+      throw new CloudError(
+        expectedKind === 'html' ? 'INVALID_HTML' : 'INVALID_MARKDOWN',
+        expectedKind === 'html' ? 'HTML 正文不能包含 NUL 字符。' : '正文不能包含 NUL 字符。',
+        400,
+      );
+    }
+    const body = Buffer.from(rawContent, 'utf8');
+    if (body.length > this.maxDocBytes) {
       throw new CloudError(
         'DOCUMENT_TOO_LARGE',
         `文档超过 ${(this.maxDocBytes / 1024 / 1024).toFixed(0)} MB 限制。`,
         413,
       );
     }
+
+    const detectedKind = nameParts.kind === null
+      ? (looksLikeCompleteHtmlDocument(rawContent) ? 'html' : 'markdown')
+      : nameParts.kind;
+    if (nameParts.kind === null && requestedKind && requestedKind !== detectedKind) {
+      throw new CloudError('KIND_CONFLICT', 'kind 与检测到的正文类型不一致。', 400);
+    }
+    const docKind = nameParts.kind || detectedKind;
+
+    // Normalize only names whose kind had to be inferred. Explicit .html/.htm
+    // and .md/.markdown names (including .html.txt) are preserved.
+    if (docKind === 'html') {
+      if (!/\.html?$/i.test(docName)) docName += '.html';
+    } else if (!IMPORT_EXTENSION_RE.test(docName)) {
+      docName += '.md';
+    }
+    if (docName.length > 200) throw new CloudError('INVALID_NAME', '文档名过长。', 400);
+    if (docKind === 'html' && !/\.html?$/i.test(docName)) {
+      throw new CloudError('UNSUPPORTED_TYPE', 'HTML 文稿必须使用 .html 或 .htm 扩展名。', 415);
+    }
+    if (docKind === 'markdown' && !IMPORT_EXTENSION_RE.test(docName)) {
+      throw new CloudError('UNSUPPORTED_TYPE', '请选择 Markdown、HTML 或纯文本文件，不支持此文件后缀。', 415);
+    }
+
     let idempotencyKey = '';
     if (requestId !== undefined && requestId !== null && requestId !== '') {
       if (typeof requestId !== 'string' || !IMPORT_REQUEST_ID_RE.test(requestId)) {
@@ -619,7 +719,11 @@ export class CloudStore {
       }
       idempotencyKey = requestId;
     }
-    const payloadHash = sha256(JSON.stringify({ name: docName, markdown }));
+    // Keep legacy Markdown hashes byte-for-byte compatible. HTML is a new
+    // namespace, so include its canonical kind and content in the hash.
+    const payloadHash = docKind === 'html'
+      ? sha256(JSON.stringify({ name: docName, kind: 'html', content: rawContent }))
+      : sha256(JSON.stringify({ name: docName, markdown: rawContent }));
 
     return this._withImportLock(userId, async () => {
       const map = idempotencyKey ? await this._readImportMap(userId) : null;
@@ -640,7 +744,7 @@ export class CloudStore {
               doc: {
                 id: meta.id,
                 name: meta.name,
-                kind: 'markdown',
+                kind: normalizedMetaKind(meta),
                 revision: Number(meta.revision) || 1,
                 size: Number(meta.size) || 0,
                 updatedAt: meta.updatedAt || meta.createdAt || null,
@@ -675,7 +779,9 @@ export class CloudStore {
       const saved = await this.upsertDocument(
         userId,
         docId,
-        { name: docName, markdown, kind: 'markdown' },
+        docKind === 'html'
+          ? { name: docName, kind: 'html', content: rawContent }
+          : { name: docName, kind: 'markdown', markdown: rawContent },
         { createOnly: true },
       );
       if (idempotencyKey) {
