@@ -416,6 +416,7 @@ function dismissLibrary() {
 }
 
 function applyLibraryHistoryView({ focus = false } = {}) {
+  setHtmlFullscreen(false);
   state.view = 'library';
   state.historyBaseCreated = true;
   // Remember the visible document in the library entry itself. A refresh on
@@ -455,7 +456,6 @@ function applyReaderHistoryView(docId) {
 }
 
 function handlePopState(event) {
-  setHtmlFullscreen(false);
   const visited = event.state?.[HISTORY_STATE_KEY] === HISTORY_STATE_VERSION
     ? event.state
     : null;
@@ -957,8 +957,8 @@ function setHtmlFullscreen(open) {
   }
 }
 
-function destroyHtmlFrame() {
-  setHtmlFullscreen(false);
+function destroyHtmlFrame({ keepFullscreen = false } = {}) {
+  if (!keepFullscreen) setHtmlFullscreen(false);
   state.htmlFrameGeneration += 1;
   state.htmlFramePending = false;
   state.htmlFrameCleanup?.();
@@ -996,7 +996,7 @@ function renderHtmlDocument(doc, { preserve = false } = {}) {
   if (!previewUrlIsLocal(doc)) {
     throw new ApiError('HTML 预览地址无效，已拒绝加载。', 'BAD_PREVIEW_URL', 500);
   }
-  destroyHtmlFrame();
+  destroyHtmlFrame({ keepFullscreen: preserve });
   els.doc.hidden = true;
   els.doc.innerHTML = '';
   els.docEnd.hidden = true;
@@ -3481,19 +3481,24 @@ function bindEvents() {
     applyTheme(els.root.dataset.theme === 'dark' ? 'light' : 'dark', { persist: true });
   });
 
+  let nativeReaderFullscreen = false;
   els.htmlFullscreen?.addEventListener('click', () => {
     const open = !els.root.classList.contains('html-fullscreen');
     setHtmlFullscreen(open);
-    if (open && document.fullscreenEnabled && !isStandalonePwa()) {
+    if (open && !hasTouchInput() && !isStandalonePwa() && document.fullscreenEnabled) {
       els.shell.requestFullscreen().then(() => {
         if (!els.root.classList.contains('html-fullscreen') && document.fullscreenElement === els.shell) {
           return document.exitFullscreen();
         }
-      }).catch(() => {}); // The in-app view also works without browser fullscreen.
+      }).catch(() => {}); // The in-app view works independently of native fullscreen.
     }
   });
   document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement) setHtmlFullscreen(false);
+    if (document.fullscreenElement === els.shell) nativeReaderFullscreen = true;
+    else if (nativeReaderFullscreen) {
+      nativeReaderFullscreen = false;
+      setHtmlFullscreen(false);
+    }
   });
   els.htmlDesktop?.addEventListener('click', () => {
     const enabled = els.htmlDesktop.getAttribute('aria-pressed') === 'true';

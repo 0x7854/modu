@@ -742,6 +742,8 @@ body.library-doc-dragging { cursor: grabbing; user-select: none; -webkit-user-se
 }
 
 .reader-rail {
+  position: relative;
+  z-index: 8;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -850,7 +852,7 @@ body.library-doc-dragging { cursor: grabbing; user-select: none; -webkit-user-se
   background: #fff;
 }
 .html-view-actions { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
-.html-view-actions button { min-height: 44px; padding-inline: 12px; font-size: 13px; }
+.html-view-actions button { touch-action: manipulation; min-height: 44px; padding-inline: 12px; font-size: 13px; }
 .html-view-actions button[aria-pressed="true"] { color: var(--accent-strong); background: var(--accent-wash); }
 .html-fullscreen .cloud-topbar, .html-fullscreen .library, .html-fullscreen .reading-footer,
 .html-fullscreen .html-mode-note, .html-fullscreen .reader-meta, .html-fullscreen .status-chip { display: none; }

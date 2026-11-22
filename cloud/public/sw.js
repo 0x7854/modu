@@ -3,7 +3,7 @@
 // The offline cache contains only the public app shell and its static assets.
 // It never caches /api responses, Markdown/HTML bodies, session data, or anything
 // account-specific, so an offline page cannot reveal another account.
-const VERSION = 'modu-cloud-v1.3.0-r20';
+const VERSION = 'modu-cloud-v1.3.0-r21';
 const SHELL_CACHE = `${VERSION}-shell`;
 
 // Install every execution dependency before activation. In WebKit the worker
@@ -101,7 +101,13 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    const upgraded = keys.some(key => key.startsWith('modu-cloud-') && key !== SHELL_CACHE);
+    // Old shells up through r19 need a navigation to gain HTML fullscreen.
+    // From r20 onward, let the next normal navigation pick up the update.
+    // Reloading a live reader here discards both its iframe and its fullscreen.
+    const priorReleases = keys.filter(key => key !== SHELL_CACHE)
+      .map(key => /^modu-cloud-v[\d.]+-r(\d+)-shell$/.exec(key))
+      .filter(Boolean).map(match => Number(match[1]));
+    const needsLegacyReload = priorReleases.length > 0 && Math.max(...priorReleases) < 20;
     await Promise.all(keys
       .filter((key) => key.startsWith('modu-cloud-') && key !== SHELL_CACHE)
       .map((key) => caches.delete(key)));
@@ -110,7 +116,7 @@ self.addEventListener('activate', (event) => {
     // network worker, but leaves the old Markdown-only renderer in memory.
     // Navigate only top-level app windows once, after a complete upgrade;
     // preserve the selected-document hash and never navigate preview frames.
-    if (upgraded) {
+    if (needsLegacyReload) {
       const windows = await self.clients.matchAll({ type: 'window' });
       windows.forEach(client => {
         const url = new URL(client.url);

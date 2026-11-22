@@ -550,7 +550,7 @@ test(`document switch ${browserKind}: a timed-out read clears the overlay and ke
   }
 });
 
-test(`service worker ${browserKind}: r20 reuses unchanged r6 vendor cache and never caches API`, {
+test(`service worker ${browserKind}: r21 reuses unchanged r6 vendor cache and never caches API`, {
   skip: canRun ? false : 'No Playwright browser available',
   timeout: 60000,
 }, async () => {
@@ -578,15 +578,15 @@ test(`service worker ${browserKind}: r20 reuses unchanged r6 vendor cache and ne
     await page.locator('#login-submit').click();
     await page.locator('#cloud-shell').waitFor({ state: 'visible', timeout: 15000 });
     await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 });
-    await page.waitForFunction(async () => (await caches.keys()).includes('modu-cloud-v1.3.0-r20-shell'), null, {
+    await page.waitForFunction(async () => (await caches.keys()).includes('modu-cloud-v1.3.0-r21-shell'), null, {
       timeout: 20000,
     });
 
-    await page.waitForFunction(() => new URL(location.href).searchParams.get('modu-shell') === 'modu-cloud-v1.3.0-r20');
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('modu-shell') === 'modu-cloud-v1.3.0-r21');
     await page.locator('#cloud-shell').waitFor({state: 'visible'});
     const audit = await page.evaluate(async () => {
       const keys = await caches.keys();
-      const cache = await caches.open('modu-cloud-v1.3.0-r20-shell');
+      const cache = await caches.open('modu-cloud-v1.3.0-r21-shell');
       const paths = [];
       const vendorBodies = {};
       for (const request of await cache.keys()) {
@@ -599,7 +599,7 @@ test(`service worker ${browserKind}: r20 reuses unchanged r6 vendor cache and ne
       return { keys, paths, vendorBodies };
     });
 
-    assert.ok(audit.keys.includes('modu-cloud-v1.3.0-r20-shell'));
+    assert.ok(audit.keys.includes('modu-cloud-v1.3.0-r21-shell'));
     for (const required of ['/', '/cloud.css', '/cloud.js', '/vendor/markdown-it.min.js', '/vendor/purify.min.js']) {
       assert.ok(audit.paths.includes(required), `r6 shell missing ${required}`);
     }
@@ -607,6 +607,41 @@ test(`service worker ${browserKind}: r20 reuses unchanged r6 vendor cache and ne
     assert.match(audit.vendorBodies['/vendor/purify.min.js'], /R5_PURIFY_VENDOR_MARKER/);
     assert.equal(audit.paths.some((entry) => entry.startsWith('/api/')), false, 'API must never be cached');
     assert.deepEqual(pageErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test(`service worker ${browserKind}: an r20 update leaves the active HTML reader open`, {
+  skip: canRun ? false : 'No Playwright browser available',
+  timeout: 30000,
+}, async () => {
+  const { context, page } = await newPage({ serviceWorkers: 'allow' });
+  const id = 'e'.repeat(32);
+  try {
+    await store.upsertDocument(userId, id, {
+      name: 'slides.html', kind: 'html', content: '<button onclick="this.textContent=2">1</button>',
+    });
+    await page.goto(base + '/#doc-' + id);
+    await page.locator('#login-user').waitFor();
+    await page.evaluate(() => caches.open('modu-cloud-v1.3.0-r20-shell').then(() => true));
+    await page.locator('#login-user').fill('alice');
+    await page.locator('#login-pass').fill('correct horse battery');
+    await page.locator('#login-submit').click();
+    const fullscreen = page.locator('#html-fullscreen');
+    await fullscreen.tap();
+    const slide = page.frameLocator('#html-frame').locator('button');
+    await slide.tap();
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+    await page.waitForFunction(async () => !(await caches.keys()).includes('modu-cloud-v1.3.0-r20-shell'));
+    assert.equal(await fullscreen.textContent(), '退出全屏');
+    assert.equal(await slide.textContent(), '2');
+    assert.equal(new URL(page.url()).searchParams.has('modu-shell'), false);
+    await page.reload();
+    await fullscreen.waitFor();
+    assert.equal(await fullscreen.textContent(), '全屏');
+    await fullscreen.tap();
+    assert.equal(await fullscreen.textContent(), '退出全屏');
   } finally {
     await context.close();
   }
