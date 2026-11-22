@@ -717,6 +717,9 @@ test(`Mac cloud panel ${chromiumReady ? 'Chromium' : 'WebKit'}: remote-only list
     assert.match(await page.locator('#cloud-folder-tree').textContent(), /全部文稿/);
     assert.match(await page.locator('#cloud-folder-tree').textContent(), /未归档/);
     assert.equal(await page.locator('.cloud-online-item').count(), 3);
+    const remoteLink = page.locator('#cloud-online-docs a').filter({ hasText: '仅云端.md' });
+    assert.equal(await remoteLink.getAttribute('href'), `https://md.example.test/#doc-${REMOTE}`);
+    assert.equal(await remoteLink.getAttribute('target'), '_blank');
     assert.equal(
       await page.evaluate(() => document.querySelectorAll('.cloud-online-item button button').length),
       0,

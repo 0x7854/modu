@@ -49,6 +49,24 @@ const els = {
   libraryDialogSubmit: $('#library-dialog-submit'),
   libraryDialogCancel: $('#library-dialog-cancel'),
   libraryDialogClose: $('#library-dialog-close'),
+  importDoc: $('#import-doc'),
+  importFile: $('#import-file'),
+  shortcutSettings: $('#shortcut-settings'),
+  shortcutDialog: $('#shortcut-dialog'),
+  shortcutClose: $('#shortcut-close'),
+  shortcutDownload: $('#shortcut-download'),
+  shortcutDownloadUrl: $('#shortcut-download-url'),
+  shortcutCopyDownload: $('#shortcut-copy-download'),
+  shortcutUrl: $('#shortcut-url'),
+  shortcutCopyUrl: $('#shortcut-copy-url'),
+  shortcutTokenStatus: $('#shortcut-token-status'),
+  shortcutTokenSecret: $('#shortcut-token-secret'),
+  shortcutTokenValue: $('#shortcut-token-value'),
+  shortcutCopyToken: $('#shortcut-copy-token'),
+  shortcutTokenHint: $('#shortcut-token-hint'),
+  shortcutGenerate: $('#shortcut-generate'),
+  shortcutRevoke: $('#shortcut-revoke'),
+  shortcutError: $('#shortcut-error'),
   userLine: $('#user-line'),
   footerUser: $('#footer-user'),
   footerStatus: $('#footer-status'),
@@ -67,6 +85,9 @@ const els = {
   doc: $('#cloud-doc'),
   docEnd: $('#doc-end'),
   htmlStage: $('#html-stage'),
+  htmlViewActions: $('#html-view-actions'),
+  htmlFullscreen: $('#html-fullscreen'),
+  htmlDesktop: $('#html-desktop'),
   htmlFrameHost: $('#html-frame-host'),
   htmlFrameError: $('#html-frame-error'),
   htmlErrorTitle: $('#html-error-title'),
@@ -167,6 +188,12 @@ const state = {
   libraryView: { kind: LIBRARY_VIEW_ALL, folderId: '' },
   libraryDialog: null,
   libraryDialogBusy: false,
+  importBusy: false,
+  importPending: null,
+  maxDocBytes: 2 * 1024 * 1024,
+  shortcutBusy: false,
+  shortcutConfigured: false,
+  shortcutToken: '',
   docDrag: null,
   docDragBusy: false,
   docDragSuppressClickUntil: 0,
@@ -242,6 +269,14 @@ function currentHistoryView() {
   return currentHistoryState()?.view || '';
 }
 
+function historyEntryHasBase(entry) {
+  // A library entry is itself the base. Reader/auth entries only claim one
+  // when this release wrote the marker, so a restored single-entry reader
+  // from an older launch can be repaired instead of silently trusting that a
+  // Back target still exists.
+  return Boolean(entry && (entry.view === 'library' || entry.base === true));
+}
+
 function libraryUrl() {
   return `${location.pathname}${location.search}`;
 }
@@ -258,7 +293,11 @@ function docIdFromHash() {
 function replaceAuthHistory({ keepUrl = false, libraryBehind = false } = {}) {
   state.view = 'auth';
   try {
-    const extra = libraryBehind ? { libraryBehind: true } : {};
+    // `base` is the durable evidence that a library entry exists directly
+    // behind this auth entry. `libraryBehind` alone is only a hint: older
+    // releases wrote it from a current reader state without proving the base
+    // was still in the back-forward list.
+    const extra = libraryBehind ? { libraryBehind: true, base: true } : {};
     history.replaceState(makeHistoryState('auth', extra), '', keepUrl ? location.href : libraryUrl());
   } catch {
     // History can be unavailable in unusual embedded contexts. The auth
@@ -270,7 +309,7 @@ function ensureLibraryHistory() {
   state.view = 'library';
   state.historyBaseCreated = true;
   try {
-    history.replaceState(makeHistoryState('library'), '', libraryUrl());
+    history.replaceState(makeHistoryState('library', { base: true }), '', libraryUrl());
   } catch {
     // Never block the library screen on a history failure.
   }
@@ -279,26 +318,37 @@ function ensureLibraryHistory() {
 
 function commitReaderHistory(docId) {
   if (!docId) return;
-  const view = currentHistoryView();
-  const next = makeHistoryState('reader', { docId });
+  const saved = currentHistoryState();
+  const view = saved?.view || '';
+  // Legacy entries without our base marker need one migration repair.
+  // A restored PWA entry can carry the reader state without
+  // the library entry, which used to send the first Back to an old page or out
+  // of the app. Repair once by replacing the orphaned entry with a library
+  // base and putting the reader on top; the marker prevents repeat growth.
+  const hasBase = historyEntryHasBase(saved);
+  const next = makeHistoryState('reader', { docId, base: true });
   try {
-    if (view === 'reader') {
+    if (view === 'reader' && hasBase) {
       // Switching documents reuses the one reader entry; Back still lands on
       // the library instead of growing one entry per document.
-      if (currentHistoryState()?.docId !== docId || location.hash !== readerUrl(docId)) {
+      if (saved?.docId !== docId || location.hash !== readerUrl(docId)) {
         history.replaceState(next, '', readerUrl(docId));
       }
     } else if (view === 'library') {
       history.pushState(next, '', readerUrl(docId));
-    } else if (currentHistoryState()?.libraryBehind === true && state.historyBaseCreated) {
+    } else if (view === 'auth'
+      && saved?.libraryBehind === true
+      && state.historyBaseCreated
+      && hasBase) {
       // Re-login after logout: the auth entry replaced a reader whose library
       // base is still directly behind it. Reuse that base instead of pushing
       // a second library/reader pair.
       history.replaceState(next, '', readerUrl(docId));
     } else {
-      // First meaningful library entry, then the reader on top of it. The
-      // library keeps the reader's doc id for a safe refresh/restore.
-      history.replaceState(makeHistoryState('library', { docId }), '', libraryUrl());
+      // First meaningful library entry, or a reader entry restored without a
+      // base. Keep the library entry on the current slot (so its doc id is
+      // available for a safe refresh/restore) and then push the reader.
+      history.replaceState(makeHistoryState('library', { docId, base: true }), '', libraryUrl());
       history.pushState(next, '', readerUrl(docId));
     }
   } catch {
@@ -366,6 +416,7 @@ function dismissLibrary() {
 }
 
 function applyLibraryHistoryView({ focus = false } = {}) {
+  setHtmlFullscreen(false);
   state.view = 'library';
   state.historyBaseCreated = true;
   // Remember the visible document in the library entry itself. A refresh on
@@ -373,7 +424,11 @@ function applyLibraryHistoryView({ focus = false } = {}) {
   // leaving Forward able to reveal it.
   if (state.currentDoc?.id) {
     try {
-      history.replaceState(makeHistoryState('library', { docId: state.currentDoc.id }), '', libraryUrl());
+      history.replaceState(
+        makeHistoryState('library', { docId: state.currentDoc.id, base: true }),
+        '',
+        libraryUrl(),
+      );
     } catch {
       // Ignore; the library view is still usable.
     }
@@ -412,7 +467,11 @@ function handlePopState(event) {
         libraryBehind: Boolean(visited?.view === 'reader' && state.historyBaseCreated),
       });
     } else {
-      replaceAuthHistory({ libraryBehind: visited?.libraryBehind === true });
+      replaceAuthHistory({
+        libraryBehind: state.historyBaseCreated
+          && visited?.libraryBehind === true
+          && visited?.base === true,
+      });
     }
     return;
   }
@@ -858,6 +917,7 @@ function applyDocumentModeUi(kind) {
   const isHtml = kind === 'html';
   els.root.dataset.docKind = isHtml ? 'html' : 'markdown';
   els.htmlModeNote.hidden = !isHtml;
+  if (els.htmlViewActions) els.htmlViewActions.hidden = !isHtml;
   // The shell theme toggle controls Markdown typography/chrome only. An HTML
   // page owns its own appearance and cannot be restyled from the parent.
   els.themeToggle.hidden = isHtml;
@@ -866,7 +926,39 @@ function applyDocumentModeUi(kind) {
     : '云端只读 · Markdown';
 }
 
-function destroyHtmlFrame() {
+// The iframe stays mounted while its viewport changes, preserving the page's
+// own presentation state. A tablet can fit a desktop layout even in portrait.
+function fitHtmlDesktop() {
+  const host = els.htmlFrameHost;
+  if (els.root.classList.contains('html-fullscreen') &&
+      els.htmlDesktop.getAttribute('aria-pressed') === 'true' && host.clientWidth) {
+    const width = Math.max(1100, host.clientWidth);
+    const scale = host.clientWidth / width;
+    host.style.setProperty('--preview-width', width + 'px');
+    host.style.setProperty('--preview-height', host.clientHeight / scale + 'px');
+    host.style.setProperty('--preview-scale', String(scale));
+  } else {
+    for (const name of ['--preview-width', '--preview-height', '--preview-scale']) {
+      host.style.removeProperty(name);
+    }
+  }
+}
+
+function setHtmlFullscreen(open) {
+  if (els.root.classList.contains('html-fullscreen') === open) return;
+  els.root.classList.toggle('html-fullscreen', open);
+  els.htmlFullscreen.textContent = open ? '退出全屏' : '全屏';
+  els.htmlDesktop.hidden = !open;
+  els.htmlDesktop.setAttribute('aria-pressed', String(open && window.innerWidth >= 700));
+  fitHtmlDesktop();
+  syncEdgeHitRegion();
+  if (!open && document.fullscreenElement === els.shell) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+function destroyHtmlFrame({ keepFullscreen = false } = {}) {
+  if (!keepFullscreen) setHtmlFullscreen(false);
   state.htmlFrameGeneration += 1;
   state.htmlFramePending = false;
   state.htmlFrameCleanup?.();
@@ -904,7 +996,7 @@ function renderHtmlDocument(doc, { preserve = false } = {}) {
   if (!previewUrlIsLocal(doc)) {
     throw new ApiError('HTML 预览地址无效，已拒绝加载。', 'BAD_PREVIEW_URL', 500);
   }
-  destroyHtmlFrame();
+  destroyHtmlFrame({ keepFullscreen: preserve });
   els.doc.hidden = true;
   els.doc.innerHTML = '';
   els.docEnd.hidden = true;
@@ -1313,12 +1405,20 @@ function showAuth(message = '', { keepUrl = false, libraryBehind } = {}) {
   // On a first visit the document hash still chooses the post-login document,
   // so it is preserved while the login screen is shown. Logout/expiry clears
   // the hash and labels the entry as auth so Back/Forward cannot rebuild it.
+  // A reader entry proves a base only when this release marked it. An auth
+  // entry can preserve a base across login failures, but legacy auth entries
+  // that merely claimed `libraryBehind` are repaired by the login path.
   const behind = libraryBehind === undefined
-    ? (priorState?.libraryBehind === true
-      || (state.historyBaseCreated && priorView === 'reader'))
+    ? (state.historyBaseCreated && (priorView === 'reader'
+      || (priorView === 'auth' && priorState?.base === true)))
     : Boolean(libraryBehind);
   replaceAuthHistory({ keepUrl, libraryBehind: behind });
-  window.setTimeout(() => els.loginUser.focus(), 30);
+  window.setTimeout(() => {
+    // Do not steal focus if the user has already started filling the form.
+    if (state.view === 'auth' && !els.auth.hidden && !els.auth.contains(document.activeElement)) {
+      els.loginUser.focus();
+    }
+  }, 30);
 }
 
 function showApp() {
@@ -1375,6 +1475,7 @@ function applyBootstrap(payload) {
   state.csrfToken = payload.csrfToken || '';
   state.documents = payload.documents;
   state.documentSignature = documentSignature(state.documents);
+  if (Number(payload.maxDocBytes) > 0) state.maxDocBytes = Number(payload.maxDocBytes);
   if (payload.library) {
     setLibrary(payload.library, { loaded: true });
     state.libraryError = '';
@@ -1546,6 +1647,8 @@ async function logout() {
   state.csrfToken = '';
   state.currentDoc = null;
   state.currentMarkdown = '';
+  state.importPending = null;
+  closeShortcutDialog({ restoreFocus: false });
   safeSessionClear();
   els.doc.innerHTML = '';
   els.docList.replaceChildren();
@@ -1654,6 +1757,7 @@ function syncLibraryActionButtons() {
   for (const button of [els.folderRename, els.folderMove, els.folderDelete]) {
     button.disabled = disabled;
   }
+  syncImportAndShortcutButtons();
 }
 
 function renderFolderTree() {
@@ -1895,6 +1999,311 @@ async function refreshLibrary({ quiet = false } = {}) {
       renderLibraryState();
       renderDocList();
     }
+  }
+}
+
+/* ------------------------------------------------- import / shortcut */
+
+const IMPORT_BUTTON_LABEL = '导入文档';
+
+function isShortcutDialogOpen() {
+  return Boolean(els.shortcutDialog && !els.shortcutDialog.hidden);
+}
+
+function setShortcutError(message) {
+  els.shortcutError.hidden = !message;
+  els.shortcutError.textContent = message || '';
+}
+
+function syncImportAndShortcutButtons() {
+  const offline = !state.authenticated || !state.online;
+  els.importDoc.disabled = state.importBusy || offline;
+  els.importDoc.textContent = state.importBusy ? '正在导入…' : IMPORT_BUTTON_LABEL;
+  els.shortcutSettings.disabled = state.shortcutBusy || offline;
+  els.shortcutGenerate.disabled = state.shortcutBusy || offline;
+  els.shortcutRevoke.disabled = state.shortcutBusy || offline || !state.shortcutConfigured;
+}
+
+function randomImportRequestId() {
+  const bytes = new Uint8Array(16);
+  try {
+    window.crypto.getRandomValues(bytes);
+  } catch {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+function importFileFingerprint(file) {
+  return [file.name, file.size, file.lastModified || 0].join(':');
+}
+
+async function importDocumentFile(file) {
+  if (!file || state.importBusy || !state.authenticated) return;
+  if (!state.online) {
+    showToast('当前离线，无法导入。恢复网络后重试。', 'error');
+    return;
+  }
+  const importName = String(file.name || '').trim();
+  const extension = /\.[^./\\]*$/.exec(importName)?.[0] || '';
+  if (!importName || (extension && !/^\.(?:md|markdown|html|htm|txt)$/i.test(extension))) {
+    showToast('请选择 Markdown、HTML 或纯文本文件，不支持此文件后缀。', 'error');
+    return;
+  }
+  const maxBytes = Number(state.maxDocBytes) || 2 * 1024 * 1024;
+  if (Number.isFinite(file.size) && file.size > maxBytes) {
+    showToast(`文件超过 ${(maxBytes / 1024 / 1024).toFixed(0)} MB 限制。`, 'error');
+    return;
+  }
+
+  const authGeneration = state.authGeneration;
+  const fingerprint = importFileFingerprint(file);
+  // Reuse the requestId after a network/timeout failure so a retry cannot create
+  // a second document. A deliberately selected different file gets a new id.
+  const requestId = state.importPending?.fingerprint === fingerprint
+    ? state.importPending.requestId
+    : randomImportRequestId();
+  state.importPending = { fingerprint, requestId };
+  state.importBusy = true;
+  syncImportAndShortcutButtons();
+
+  try {
+    const content = await file.text();
+    showToast(`正在导入 ${file.name}…`, 'info');
+    const payload = await api('/api/import/documents', {
+      method: 'POST',
+      csrf: true,
+      timeoutMs: 60_000,
+      body: { name: file.name, content, requestId },
+    });
+    if (authGeneration !== state.authGeneration || !state.authenticated) return;
+    if (!payload?.doc?.id) {
+      throw new ApiError('导入响应不完整。', 'BAD_RESPONSE', 500);
+    }
+    state.importPending = null;
+    await loadDocuments({ autoOpen: false });
+    await openDocument(payload.doc.id, { force: true, silent: true });
+    showToast(`已导入 ${payload.doc.name}`, 'success');
+  } catch (error) {
+    // Keep the id only for failures where the server may have committed but the
+    // response was lost. A validation error should allow a corrected file to
+    // reuse the same requestId without a false conflict.
+    const retryable = error instanceof ApiError
+      && (error.status === 0 || error.status >= 500);
+    if (!retryable) state.importPending = null;
+    showToast(error.message || '导入失败，请检查网络后重试。', 'error');
+  } finally {
+    state.importBusy = false;
+    syncImportAndShortcutButtons();
+  }
+}
+
+function renderShortcutStatus(payload) {
+  const configured = Boolean(payload?.configured);
+  const valid = configured && Boolean(payload?.valid);
+  state.shortcutConfigured = configured;
+  if (!configured) {
+    els.shortcutTokenStatus.textContent = '尚未生成';
+  } else if (valid) {
+    const rotated = formatTime(payload?.tokenInfo?.rotatedAt);
+    els.shortcutTokenStatus.textContent = rotated ? `已启用 · ${rotated}` : '已启用';
+  } else {
+    els.shortcutTokenStatus.textContent = '已失效，请重新生成';
+  }
+  els.shortcutGenerate.textContent = configured ? '轮换令牌' : '生成令牌';
+  els.shortcutRevoke.hidden = !configured;
+  els.shortcutTokenHint.textContent = configured && !valid
+    ? '密码重置或账户状态变化后，旧令牌会立即失效；重新生成即可。'
+    : '令牌只用于创建新文档，不能读取现有文档，也不要在聊天或公开页面中分享。';
+  syncImportAndShortcutButtons();
+}
+
+async function refreshShortcutStatus() {
+  const authGeneration = state.authGeneration;
+  state.shortcutBusy = true;
+  setShortcutError('');
+  syncImportAndShortcutButtons();
+  try {
+    const payload = await api('/api/import/token');
+    if (!isShortcutDialogOpen()
+      || authGeneration !== state.authGeneration
+      || !state.authenticated) return;
+    renderShortcutStatus(payload);
+  } catch (error) {
+    if (!isShortcutDialogOpen()
+      || authGeneration !== state.authGeneration
+      || !state.authenticated) return;
+    els.shortcutTokenStatus.textContent = '无法读取状态';
+    setShortcutError(error.message || '无法读取仅导入令牌状态。');
+  } finally {
+    state.shortcutBusy = false;
+    syncImportAndShortcutButtons();
+  }
+}
+
+let shortcutDownloadFile = null;
+let shortcutDownloadPreparing = false;
+
+async function prepareShortcutDownload() {
+  if (shortcutDownloadPreparing) return;
+  shortcutDownloadPreparing = true;
+  shortcutDownloadFile = null;
+  els.shortcutDownload.disabled = true;
+  els.shortcutDownload.textContent = '正在准备文件…';
+  try {
+    const response = await fetch('/shortcuts/Open-in-Modu.shortcut', {
+      cache: 'no-store', signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error('download failed');
+    const blob = await response.blob();
+    const file = new File([blob], '用墨读打开.shortcut', { type: 'application/x-apple-shortcut' });
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      shortcutDownloadFile = file;
+      els.shortcutDownload.textContent = '保存快捷指令文件';
+    } else {
+      els.shortcutDownload.textContent = '复制下载链接，在 Safari 中安装';
+    }
+  } catch {
+    els.shortcutDownload.textContent = '复制下载链接，在 Safari 中安装';
+  } finally {
+    shortcutDownloadPreparing = false;
+    els.shortcutDownload.disabled = false;
+  }
+}
+
+async function saveShortcutDownload() {
+  if (!shortcutDownloadFile) {
+    return copyShortcutValue(els.shortcutDownloadUrl.value, els.shortcutDownloadUrl, '下载链接（请粘贴到 Safari 地址栏）');
+  }
+  // File is prefetched: invoke share inside the click activation, before any await.
+  try {
+    await navigator.share({ files: [shortcutDownloadFile] });
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      setShortcutError('系统暂不支持保存此文件。请复制下载链接，在 Safari 地址栏中粘贴打开。');
+    }
+  }
+}
+
+function openShortcutDialog() {
+  if (!state.authenticated || !state.online) return;
+  state.shortcutToken = '';
+  state.shortcutConfigured = false;
+  els.shortcutTokenSecret.hidden = true;
+  els.shortcutTokenValue.value = '';
+  els.shortcutUrl.value = location.origin;
+  els.shortcutDownloadUrl.value = new URL('/shortcuts/Open-in-Modu.shortcut', location.origin).href;
+  prepareShortcutDownload();
+  els.shortcutTokenStatus.textContent = '正在读取…';
+  els.shortcutGenerate.textContent = '生成令牌';
+  els.shortcutRevoke.hidden = true;
+  els.shortcutRevoke.disabled = true;
+  setShortcutError('');
+  els.shortcutDialog.hidden = false;
+  syncEdgeHitRegion();
+  syncImportAndShortcutButtons();
+  refreshShortcutStatus();
+  requestAnimationFrame(() => els.shortcutClose.focus({ preventScroll: true }));
+}
+
+function closeShortcutDialog({ restoreFocus = true } = {}) {
+  if (!isShortcutDialogOpen()) return;
+  els.shortcutDialog.hidden = true;
+  state.shortcutToken = '';
+  els.shortcutTokenValue.value = '';
+  els.shortcutTokenSecret.hidden = true;
+  setShortcutError('');
+  syncEdgeHitRegion();
+  if (restoreFocus && state.authenticated) {
+    els.shortcutSettings.focus({ preventScroll: true });
+  }
+}
+
+async function generateShortcutToken() {
+  if (state.shortcutBusy || !state.authenticated) return;
+  const authGeneration = state.authGeneration;
+  state.shortcutBusy = true;
+  setShortcutError('');
+  syncImportAndShortcutButtons();
+  try {
+    const payload = await api('/api/import/token', {
+      method: 'POST',
+      csrf: true,
+      body: {},
+    });
+    if (authGeneration !== state.authGeneration || !state.authenticated) return;
+    if (!payload?.token) {
+      throw new ApiError('令牌响应不完整。', 'BAD_RESPONSE', 500);
+    }
+    state.shortcutToken = payload.token;
+    state.shortcutConfigured = true;
+    els.shortcutTokenValue.value = payload.token;
+    els.shortcutTokenSecret.hidden = false;
+    els.shortcutTokenStatus.textContent = '已生成，请立即复制';
+    els.shortcutGenerate.textContent = '轮换令牌';
+    els.shortcutRevoke.hidden = false;
+    els.shortcutTokenHint.textContent = '这个令牌只显示一次。关闭对话框后无法再次查看；请立即粘贴到快捷指令。';
+    showToast('已生成仅导入令牌，请立即复制到快捷指令。', 'success');
+    els.shortcutTokenValue.focus({ preventScroll: true });
+    els.shortcutTokenValue.select();
+  } catch (error) {
+    setShortcutError(error.message || '生成令牌失败，请稍后重试。');
+  } finally {
+    state.shortcutBusy = false;
+    syncImportAndShortcutButtons();
+  }
+}
+
+async function revokeShortcutToken() {
+  if (state.shortcutBusy || !state.authenticated) return;
+  const authGeneration = state.authGeneration;
+  state.shortcutBusy = true;
+  setShortcutError('');
+  syncImportAndShortcutButtons();
+  try {
+    await api('/api/import/token', {
+      method: 'DELETE',
+      csrf: true,
+      body: {},
+    });
+    if (authGeneration !== state.authGeneration || !state.authenticated) return;
+    state.shortcutToken = '';
+    state.shortcutConfigured = false;
+    els.shortcutTokenValue.value = '';
+    els.shortcutTokenSecret.hidden = true;
+    els.shortcutTokenStatus.textContent = '尚未生成';
+    els.shortcutGenerate.textContent = '生成令牌';
+    els.shortcutRevoke.hidden = true;
+    els.shortcutTokenHint.textContent = '令牌只用于创建新文档，不能读取现有文档，也不要在聊天或公开页面中分享。';
+    showToast('已撤销仅导入令牌，快捷指令将无法继续导入。', 'success');
+  } catch (error) {
+    setShortcutError(error.message || '撤销令牌失败，请稍后重试。');
+  } finally {
+    state.shortcutBusy = false;
+    syncImportAndShortcutButtons();
+  }
+}
+
+async function copyShortcutValue(value, input, label) {
+  if (!value) {
+    showToast('没有可复制的内容。', 'info');
+    return;
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      input.focus({ preventScroll: true });
+      input.select();
+      document.execCommand('copy');
+    }
+    showToast(`${label}已复制。`, 'success');
+  } catch {
+    input.focus({ preventScroll: true });
+    input.select();
+    showToast('无法自动复制，请手动选择文本复制。', 'error');
   }
 }
 
@@ -2540,6 +2949,9 @@ async function moveDocumentByDrop(docId, folderId, baseRevision, docName) {
 
 function resetLibraryState() {
   cancelDocumentDrag();
+  closeShortcutDialog({ restoreFocus: false });
+  state.importBusy = false;
+  state.importPending = null;
   state.docDragBusy = false;
   state.docDragSuppressClickUntil = 0;
   closeLibraryDialog({ restoreFocus: false });
@@ -2569,6 +2981,7 @@ async function loadDocuments({ autoOpen = true } = {}) {
   // repopulate the next screen with the previous account's documents.
   if (authGeneration !== state.authGeneration || !state.authenticated) return state.documents;
   const documents = Array.isArray(payload.documents) ? payload.documents : [];
+  if (Number(payload.maxDocBytes) > 0) state.maxDocBytes = Number(payload.maxDocBytes);
   const nextSignature = documentSignature(documents);
   const changed = nextSignature !== state.documentSignature;
   state.documents = documents;
@@ -2840,11 +3253,13 @@ function hasTouchInput() {
 }
 
 function canUseEdgeGesture() {
-  return state.authenticated
+  return !els.root.classList.contains('html-fullscreen')
+    && state.authenticated
     && Boolean(state.currentDoc)
     && !state.libraryOpen
     && state.view !== 'library'
     && !isLibraryDialogOpen()
+    && !isShortcutDialogOpen()
     && isNarrowLayout()
     && hasTouchInput()
     && !els.shell.hidden;
@@ -3012,6 +3427,41 @@ function onAnyTouchStart(event) {
   if (state.edgeTouch && event.touches.length !== 1) resetEdgeGesture();
 }
 
+function isStandalonePwa() {
+  if (window.navigator.standalone === true) return true;
+  try {
+    return Boolean(window.matchMedia?.('(display-mode: standalone)')?.matches
+      || window.matchMedia?.('(display-mode: fullscreen)')?.matches);
+  } catch {
+    return false;
+  }
+}
+
+// In standalone mode the leading edge belongs to the app. During boot,
+// in the already-open library, or on wide screens there is no drawer strip
+// to claim it. Keep repeated edge swipes from falling through to old pages.
+// Do not touch Safari tabs, login, dialogs, controls, or multi-touch gestures.
+function shouldGuardPwaEdge(target) {
+  if (!isStandalonePwa()) return false;
+  if (!state.authenticated) return !els.boot.hidden && els.auth.hidden;
+  if (els.shell.hidden || isLibraryDialogOpen() || isShortcutDialogOpen()) return false;
+  if (!isReaderGestureTarget(target)) return false;
+  return !canUseEdgeGesture();
+}
+
+function pwaEdgeRight() {
+  if (!els.edgeNav) return EDGE_ZONE_PX;
+  const width = Number.parseFloat(getComputedStyle(els.edgeNav).width);
+  return Number.isFinite(width) && width > 0 ? width : EDGE_ZONE_PX;
+}
+
+function onPwaEdgeTouchStart(event) {
+  if (!shouldGuardPwaEdge(event.target) || event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  if (!touch || touch.clientX < 0 || touch.clientX > pwaEdgeRight()) return;
+  if (event.cancelable) event.preventDefault();
+}
+
 /* ------------------------------------------------------------- events */
 
 function bindEvents() {
@@ -3030,6 +3480,32 @@ function bindEvents() {
   els.themeToggle.addEventListener('click', () => {
     applyTheme(els.root.dataset.theme === 'dark' ? 'light' : 'dark', { persist: true });
   });
+
+  let nativeReaderFullscreen = false;
+  els.htmlFullscreen?.addEventListener('click', () => {
+    const open = !els.root.classList.contains('html-fullscreen');
+    setHtmlFullscreen(open);
+    if (open && !hasTouchInput() && !isStandalonePwa() && document.fullscreenEnabled) {
+      els.shell.requestFullscreen().then(() => {
+        if (!els.root.classList.contains('html-fullscreen') && document.fullscreenElement === els.shell) {
+          return document.exitFullscreen();
+        }
+      }).catch(() => {}); // The in-app view works independently of native fullscreen.
+    }
+  });
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement === els.shell) nativeReaderFullscreen = true;
+    else if (nativeReaderFullscreen) {
+      nativeReaderFullscreen = false;
+      setHtmlFullscreen(false);
+    }
+  });
+  els.htmlDesktop?.addEventListener('click', () => {
+    const enabled = els.htmlDesktop.getAttribute('aria-pressed') === 'true';
+    els.htmlDesktop.setAttribute('aria-pressed', String(!enabled));
+    fitHtmlDesktop();
+  });
+  if (els.htmlDesktop) new ResizeObserver(fitHtmlDesktop).observe(els.htmlFrameHost);
 
   $('#html-retry').addEventListener('click', () => {
     if (state.currentDoc?.kind === 'html') openDocument(state.currentDoc.id, {force: true});
@@ -3053,6 +3529,35 @@ function bindEvents() {
   els.folderDelete.addEventListener('click', () => {
     if (currentFolder()) openLibraryDialog('delete-folder', { folderId: currentFolder().id });
   });
+  els.importDoc.addEventListener('click', () => {
+    if (state.importBusy || !state.authenticated) return;
+    els.importFile.click();
+  });
+  els.importFile.addEventListener('change', async () => {
+    const file = els.importFile.files?.[0] || null;
+    // Clear immediately so selecting the same file again still fires change.
+    els.importFile.value = '';
+    if (file) await importDocumentFile(file);
+  });
+  els.shortcutSettings.addEventListener('click', openShortcutDialog);
+  els.shortcutClose.addEventListener('click', () => closeShortcutDialog());
+  els.shortcutDownload.addEventListener('click', saveShortcutDownload);
+  els.shortcutCopyDownload.addEventListener('click', () => copyShortcutValue(els.shortcutDownloadUrl.value, els.shortcutDownloadUrl, '下载链接（请粘贴到 Safari 地址栏）'));
+  els.shortcutDialog.addEventListener('click', (event) => {
+    if (event.target === els.shortcutDialog) closeShortcutDialog();
+  });
+  els.shortcutGenerate.addEventListener('click', generateShortcutToken);
+  els.shortcutRevoke.addEventListener('click', revokeShortcutToken);
+  els.shortcutCopyUrl.addEventListener('click', () => {
+    copyShortcutValue(els.shortcutUrl.value, els.shortcutUrl, '服务 URL');
+  });
+  els.shortcutCopyToken.addEventListener('click', () => {
+    copyShortcutValue(
+      state.shortcutToken || els.shortcutTokenValue.value,
+      els.shortcutTokenValue,
+      '仅导入令牌',
+    );
+  });
   els.libraryStateRetry.addEventListener('click', () => refreshLibrary());
   els.libraryForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -3064,19 +3569,28 @@ function bindEvents() {
     if (event.target === els.libraryDialog) closeLibraryDialog();
   });
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && els.root.classList.contains('html-fullscreen')) {
+      setHtmlFullscreen(false);
+      els.htmlFullscreen.focus();
+      return;
+    }
     if (state.docDrag && event.key === 'Escape') {
       event.preventDefault();
       cancelDocumentDrag();
       return;
     }
-    if (!isLibraryDialogOpen()) return;
+    const openDialog = isLibraryDialogOpen()
+      ? els.libraryDialog
+      : (isShortcutDialogOpen() ? els.shortcutDialog : null);
+    if (!openDialog) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      closeLibraryDialog();
+      if (openDialog === els.libraryDialog) closeLibraryDialog();
+      else closeShortcutDialog();
       return;
     }
     if (event.key !== 'Tab') return;
-    const focusable = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])', els.libraryDialog)
+    const focusable = $$('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])', openDialog)
       .filter((node) => node.offsetParent !== null);
     if (!focusable.length) return;
     const first = focusable[0];
@@ -3105,6 +3619,8 @@ function bindEvents() {
   if (els.edgeNav) {
     els.edgeNav.addEventListener('touchstart', onEdgeTouchStart, { passive: false });
   }
+  // Claim PWA edge touches when the regular drawer strip is not active.
+  window.addEventListener('touchstart', onPwaEdgeTouchStart, { passive: false, capture: true });
   window.addEventListener('touchstart', onAnyTouchStart, { passive: true });
   window.addEventListener('touchmove', onEdgeTouchMove, { passive: false });
   window.addEventListener('touchend', onEdgeTouchEnd, { passive: true });
@@ -3206,13 +3722,16 @@ async function registerServiceWorker() {
 async function initialize() {
   initTheme();
   bindEvents();
-  // A reload keeps the browser's history stack. If the current entry is a
-  // reader/library view, or an auth entry that replaced a reader, the library
-  // base is still behind it and can be reused after a later login.
-  const initialView = currentHistoryView();
-  state.historyBaseCreated = initialView === 'reader'
-    || initialView === 'library'
-    || (initialView === 'auth' && currentHistoryState()?.libraryBehind === true);
+  // A reload keeps the browser's history stack. Only trust a reader/auth
+  // entry when this release explicitly marked its library base;
+  // a restored PWA entry may have kept the view state without the Back target.
+  const initialState = currentHistoryState();
+  state.historyBaseCreated = historyEntryHasBase(initialState);
+  // cloud.js runs before deferred renderer dependencies so edge protection is
+  // already active on cold launches. Rendering waits for their script pass.
+  if ((!window.markdownit || !window.DOMPurify) && document.readyState !== 'complete') {
+    await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+  }
   try {
     markdown = createMarkdownRenderer();
   } catch (error) {

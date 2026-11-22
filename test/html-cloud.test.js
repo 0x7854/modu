@@ -32,18 +32,45 @@ test('HTML authenticated preview, real WebKit interaction/isolation, switching, 
   const prev=await fetch(base+meta.doc.previewUrl,{headers:{Cookie:cookie}});
   assert.match(prev.headers.get('content-security-policy'),/sandbox allow-scripts/);assert.doesNotMatch(prev.headers.get('content-security-policy'),/allow-same-origin/);assert.match(prev.headers.get('cache-control'),/no-store/);assert.match(await prev.text(),/modu-preview-ready/);
   const sync=await fetch(base+`/api/sync/documents/${H}`,{method:'PUT',headers:{Authorization:`Bearer ${a.syncToken}`,'Content-Type':'application/json'},body:JSON.stringify({name:'page.html',kind:'html',content:html})});assert.equal(sync.status,200);
-  browser=await webkit.launch();const context=await browser.newContext({viewport:{width:834,height:1194},serviceWorkers:'block'});const page=await context.newPage();let previewRequests=0;
+  browser=await webkit.launch();const context=await browser.newContext({viewport:{width:834,height:1194},hasTouch:true,serviceWorkers:'block'});const page=await context.newPage();let previewRequests=0;
   page.on('request',r=>{if(r.url().includes('/preview'))previewRequests++});
   await page.goto(base+`/#doc-${H}`);await page.locator('#login-user').fill('alice');await page.locator('#login-pass').fill('correct horse battery');await page.locator('#login-submit').click();
   const frame=page.frameLocator('#html-frame');await frame.locator('#counter').click();assert.equal(await frame.locator('#counter').textContent(),'1');await page.locator('#doc-loading').waitFor({state:'hidden'});
   await frame.locator('#attack').click();assert.deepEqual(JSON.parse(await frame.locator('#result').textContent()),{parent:'SecurityError',cookie:'SecurityError',storage:'SecurityError'});
   await page.waitForTimeout(1300);assert.equal(hits,0);assert.equal(previewRequests,1);assert.equal(await frame.locator('#counter').textContent(),'1');
+  const fullscreen = page.locator('#html-fullscreen');
+  const desktop = page.locator('#html-desktop');
+  const frameWidth = () => frame.locator('body').evaluate(() => innerWidth);
+  assert.equal(await fullscreen.textContent(), '全屏');
+  await fullscreen.tap();
+  await desktop.waitFor();
+  // WebKit may notify the app about unrelated fullscreen / history changes.
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event('fullscreenchange'));
+    window.dispatchEvent(new PopStateEvent('popstate', {state: history.state}));
+  });
+  assert.equal(await fullscreen.textContent(), '退出全屏');
+  assert.ok(await frameWidth() >= 1100);
+  assert.equal(await page.locator('#library').isVisible(), false);
+  await desktop.click();
+  assert.equal(await frameWidth(), 834);
+  await page.setViewportSize({width:1194,height:834});
+  await page.waitForFunction(() => document.querySelector('#html-frame').getBoundingClientRect().width === 1194);
+  await frame.locator('#counter').click();
+  await fullscreen.click();
+  assert.equal(await fullscreen.textContent(), '全屏');
+  assert.equal(await frame.locator('#counter').textContent(), '2');
+  assert.equal(previewRequests, 1);
   for(const viewport of [{width:834,height:1194},{width:1194,height:834},{width:390,height:844}]){
    await page.setViewportSize(viewport);const box=await page.locator('#html-frame').boundingBox();assert.ok(box.height>300);assert.ok(box.y>=0&&box.y+box.height<=viewport.height+1);await frame.locator('#end').scrollIntoViewIfNeeded();assert.ok(await frame.locator('#end').isVisible());
   }
+  await fullscreen.tap();
   await store.upsertDocument(a.user.id,H,{name:'page.html',kind:'html',content:html.replace('交互检查','更新后页面')});
   await frame.locator('h1').filter({hasText:'更新后页面'}).waitFor({timeout:10000});
   assert.equal(await frame.locator('#counter').textContent(),'0');
+  assert.equal(await fullscreen.textContent(), '退出全屏');
+  await fullscreen.tap();
+  assert.equal(await fullscreen.textContent(), '全屏');
   const select=async id=>{const item=page.locator(`[data-doc-id="${id}"]`);if((await item.boundingBox()).x < 0)await page.locator('#library-toggle').click();await item.click()};
   await select(M);await page.locator('#cloud-doc').filter({hasText:'MARKER'}).waitFor();assert.equal(await page.locator('#html-frame').count(),0);
   let deny=true;await page.route('**/api/documents/*/preview*',async route=>deny?route.fulfill({status:500,contentType:'text/plain',body:'failed'}):route.continue());

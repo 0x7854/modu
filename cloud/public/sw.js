@@ -3,7 +3,7 @@
 // The offline cache contains only the public app shell and its static assets.
 // It never caches /api responses, Markdown/HTML bodies, session data, or anything
 // account-specific, so an offline page cannot reveal another account.
-const VERSION = 'modu-cloud-v1.3.0-r13';
+const VERSION = 'modu-cloud-v1.3.0-r21';
 const SHELL_CACHE = `${VERSION}-shell`;
 
 // Install every execution dependency before activation. In WebKit the worker
@@ -19,6 +19,9 @@ const CORE_SHELL = [
 
 // Public runtime-cacheable assets. Deliberately an allow-list: unknown
 // same-origin paths (including anything private) always go to the network.
+// The public universal Shortcut file and every /api/import/* response are
+// intentionally absent: import tokens and private document data are never
+// written into a cache that can outlive logout.
 const PUBLIC_ASSETS = new Set([
   ...CORE_SHELL,
   '/manifest.webmanifest',
@@ -73,7 +76,7 @@ self.addEventListener('install', (event) => {
     const cache = await caches.open(SHELL_CACHE);
     const previous = (await caches.keys()).filter(key => key !== SHELL_CACHE &&
       ['modu-cloud-v1.1.0-r2-shell', 'modu-cloud-v1.1.0-r3-shell', 'modu-cloud-v1.1.0-r4-shell',
-        'modu-cloud-v1.1.0-r5-shell', 'modu-cloud-v1.1.0-r6-shell', 'modu-cloud-v1.2.0-r7-shell', 'modu-cloud-v1.2.0-r8-shell', 'modu-cloud-v1.2.0-r9-shell', 'modu-cloud-v1.2.0-r10-shell', 'modu-cloud-v1.2.0-r11-shell', 'modu-cloud-v1.3.0-r12-shell'].includes(key));
+        'modu-cloud-v1.1.0-r5-shell', 'modu-cloud-v1.1.0-r6-shell', 'modu-cloud-v1.2.0-r7-shell', 'modu-cloud-v1.2.0-r8-shell', 'modu-cloud-v1.2.0-r9-shell', 'modu-cloud-v1.2.0-r10-shell', 'modu-cloud-v1.2.0-r11-shell', 'modu-cloud-v1.3.0-r12-shell', 'modu-cloud-v1.3.0-r13-shell'].includes(key));
     await Promise.all(CORE_SHELL.map(async (url) => {
       // These vendor versions are unchanged from r2–r6; reuse only their
       // known public copies, never an HTML/script from a different release.
@@ -98,7 +101,13 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    const upgraded = keys.some(key => key.startsWith('modu-cloud-') && key !== SHELL_CACHE);
+    // Old shells up through r19 need a navigation to gain HTML fullscreen.
+    // From r20 onward, let the next normal navigation pick up the update.
+    // Reloading a live reader here discards both its iframe and its fullscreen.
+    const priorReleases = keys.filter(key => key !== SHELL_CACHE)
+      .map(key => /^modu-cloud-v[\d.]+-r(\d+)-shell$/.exec(key))
+      .filter(Boolean).map(match => Number(match[1]));
+    const needsLegacyReload = priorReleases.length > 0 && Math.max(...priorReleases) < 20;
     await Promise.all(keys
       .filter((key) => key.startsWith('modu-cloud-') && key !== SHELL_CACHE)
       .map((key) => caches.delete(key)));
@@ -107,7 +116,7 @@ self.addEventListener('activate', (event) => {
     // network worker, but leaves the old Markdown-only renderer in memory.
     // Navigate only top-level app windows once, after a complete upgrade;
     // preserve the selected-document hash and never navigate preview frames.
-    if (upgraded) {
+    if (needsLegacyReload) {
       const windows = await self.clients.matchAll({ type: 'window' });
       windows.forEach(client => {
         const url = new URL(client.url);
@@ -142,6 +151,11 @@ self.addEventListener('fetch', (event) => {
   // Private data always goes to the network. The service worker deliberately
   // has no offline response and no cache entry for these endpoints.
   if (url.pathname.startsWith('/api/')) return;
+
+  // The universal Shortcut is public but must always come from the server and
+  // never enter the shell cache. Returning here also prevents the navigation
+  // branch below from serving the app HTML for a direct .shortcut download.
+  if (url.pathname.startsWith('/shortcuts/')) return;
 
   if (request.mode === 'navigate') {
     // Versioned shell: no navigation re-download competes with private data.
