@@ -85,6 +85,9 @@ const els = {
   doc: $('#cloud-doc'),
   docEnd: $('#doc-end'),
   htmlStage: $('#html-stage'),
+  htmlViewActions: $('#html-view-actions'),
+  htmlFullscreen: $('#html-fullscreen'),
+  htmlDesktop: $('#html-desktop'),
   htmlFrameHost: $('#html-frame-host'),
   htmlFrameError: $('#html-frame-error'),
   htmlErrorTitle: $('#html-error-title'),
@@ -452,6 +455,7 @@ function applyReaderHistoryView(docId) {
 }
 
 function handlePopState(event) {
+  setHtmlFullscreen(false);
   const visited = event.state?.[HISTORY_STATE_KEY] === HISTORY_STATE_VERSION
     ? event.state
     : null;
@@ -913,6 +917,7 @@ function applyDocumentModeUi(kind) {
   const isHtml = kind === 'html';
   els.root.dataset.docKind = isHtml ? 'html' : 'markdown';
   els.htmlModeNote.hidden = !isHtml;
+  if (els.htmlViewActions) els.htmlViewActions.hidden = !isHtml;
   // The shell theme toggle controls Markdown typography/chrome only. An HTML
   // page owns its own appearance and cannot be restyled from the parent.
   els.themeToggle.hidden = isHtml;
@@ -921,7 +926,39 @@ function applyDocumentModeUi(kind) {
     : '云端只读 · Markdown';
 }
 
+// The iframe stays mounted while its viewport changes, preserving the page's
+// own presentation state. A tablet can fit a desktop layout even in portrait.
+function fitHtmlDesktop() {
+  const host = els.htmlFrameHost;
+  if (els.root.classList.contains('html-fullscreen') &&
+      els.htmlDesktop.getAttribute('aria-pressed') === 'true' && host.clientWidth) {
+    const width = Math.max(1100, host.clientWidth);
+    const scale = host.clientWidth / width;
+    host.style.setProperty('--preview-width', width + 'px');
+    host.style.setProperty('--preview-height', host.clientHeight / scale + 'px');
+    host.style.setProperty('--preview-scale', String(scale));
+  } else {
+    for (const name of ['--preview-width', '--preview-height', '--preview-scale']) {
+      host.style.removeProperty(name);
+    }
+  }
+}
+
+function setHtmlFullscreen(open) {
+  if (els.root.classList.contains('html-fullscreen') === open) return;
+  els.root.classList.toggle('html-fullscreen', open);
+  els.htmlFullscreen.textContent = open ? '退出全屏' : '全屏';
+  els.htmlDesktop.hidden = !open;
+  els.htmlDesktop.setAttribute('aria-pressed', String(open && window.innerWidth >= 700));
+  fitHtmlDesktop();
+  syncEdgeHitRegion();
+  if (!open && document.fullscreenElement === els.shell) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
 function destroyHtmlFrame() {
+  setHtmlFullscreen(false);
   state.htmlFrameGeneration += 1;
   state.htmlFramePending = false;
   state.htmlFrameCleanup?.();
@@ -3216,7 +3253,8 @@ function hasTouchInput() {
 }
 
 function canUseEdgeGesture() {
-  return state.authenticated
+  return !els.root.classList.contains('html-fullscreen')
+    && state.authenticated
     && Boolean(state.currentDoc)
     && !state.libraryOpen
     && state.view !== 'library'
@@ -3443,6 +3481,27 @@ function bindEvents() {
     applyTheme(els.root.dataset.theme === 'dark' ? 'light' : 'dark', { persist: true });
   });
 
+  els.htmlFullscreen?.addEventListener('click', () => {
+    const open = !els.root.classList.contains('html-fullscreen');
+    setHtmlFullscreen(open);
+    if (open && document.fullscreenEnabled && !isStandalonePwa()) {
+      els.shell.requestFullscreen().then(() => {
+        if (!els.root.classList.contains('html-fullscreen') && document.fullscreenElement === els.shell) {
+          return document.exitFullscreen();
+        }
+      }).catch(() => {}); // The in-app view also works without browser fullscreen.
+    }
+  });
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) setHtmlFullscreen(false);
+  });
+  els.htmlDesktop?.addEventListener('click', () => {
+    const enabled = els.htmlDesktop.getAttribute('aria-pressed') === 'true';
+    els.htmlDesktop.setAttribute('aria-pressed', String(!enabled));
+    fitHtmlDesktop();
+  });
+  if (els.htmlDesktop) new ResizeObserver(fitHtmlDesktop).observe(els.htmlFrameHost);
+
   $('#html-retry').addEventListener('click', () => {
     if (state.currentDoc?.kind === 'html') openDocument(state.currentDoc.id, {force: true});
   });
@@ -3505,6 +3564,11 @@ function bindEvents() {
     if (event.target === els.libraryDialog) closeLibraryDialog();
   });
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && els.root.classList.contains('html-fullscreen')) {
+      setHtmlFullscreen(false);
+      els.htmlFullscreen.focus();
+      return;
+    }
     if (state.docDrag && event.key === 'Escape') {
       event.preventDefault();
       cancelDocumentDrag();

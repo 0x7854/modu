@@ -3,7 +3,7 @@
 // The offline cache contains only the public app shell and its static assets.
 // It never caches /api responses, Markdown/HTML bodies, session data, or anything
 // account-specific, so an offline page cannot reveal another account.
-const VERSION = 'modu-cloud-v1.3.0-r19';
+const VERSION = 'modu-cloud-v1.3.0-r20';
 const SHELL_CACHE = `${VERSION}-shell`;
 
 // Install every execution dependency before activation. In WebKit the worker

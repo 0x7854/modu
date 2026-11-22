@@ -849,6 +849,24 @@ body.library-doc-dragging { cursor: grabbing; user-select: none; -webkit-user-se
   border: 0;
   background: #fff;
 }
+.html-view-actions { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
+.html-view-actions button { min-height: 44px; padding-inline: 12px; font-size: 13px; }
+.html-view-actions button[aria-pressed="true"] { color: var(--accent-strong); background: var(--accent-wash); }
+.html-fullscreen .cloud-topbar, .html-fullscreen .library, .html-fullscreen .reading-footer,
+.html-fullscreen .html-mode-note, .html-fullscreen .reader-meta, .html-fullscreen .status-chip { display: none; }
+.html-fullscreen .cloud-main { display: flex; }
+.html-fullscreen .reader-wrap { flex: 1; }
+.html-fullscreen .reader-rail { padding-block: 0; }
+.html-fullscreen .html-frame-host { position: relative; overflow: hidden; }
+.html-fullscreen .html-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--preview-width, 100%);
+  height: var(--preview-height, 100%);
+  transform: scale(var(--preview-scale, 1));
+  transform-origin: top left;
+}
 .html-frame-error {
   position: absolute;
   z-index: 4;

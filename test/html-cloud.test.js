@@ -38,6 +38,23 @@ test('HTML authenticated preview, real WebKit interaction/isolation, switching, 
   const frame=page.frameLocator('#html-frame');await frame.locator('#counter').click();assert.equal(await frame.locator('#counter').textContent(),'1');await page.locator('#doc-loading').waitFor({state:'hidden'});
   await frame.locator('#attack').click();assert.deepEqual(JSON.parse(await frame.locator('#result').textContent()),{parent:'SecurityError',cookie:'SecurityError',storage:'SecurityError'});
   await page.waitForTimeout(1300);assert.equal(hits,0);assert.equal(previewRequests,1);assert.equal(await frame.locator('#counter').textContent(),'1');
+  const fullscreen = page.locator('#html-fullscreen');
+  const desktop = page.locator('#html-desktop');
+  const frameWidth = () => frame.locator('body').evaluate(() => innerWidth);
+  await fullscreen.click();
+  await desktop.waitFor();
+  assert.equal(await fullscreen.textContent(), '退出全屏');
+  assert.ok(await frameWidth() >= 1100);
+  assert.equal(await page.locator('#library').isVisible(), false);
+  await desktop.click();
+  assert.equal(await frameWidth(), 834);
+  await page.setViewportSize({width:1194,height:834});
+  await page.waitForFunction(() => document.querySelector('#html-frame').getBoundingClientRect().width === 1194);
+  await frame.locator('#counter').click();
+  await fullscreen.click();
+  assert.equal(await fullscreen.textContent(), '全屏');
+  assert.equal(await frame.locator('#counter').textContent(), '2');
+  assert.equal(previewRequests, 1);
   for(const viewport of [{width:834,height:1194},{width:1194,height:834},{width:390,height:844}]){
    await page.setViewportSize(viewport);const box=await page.locator('#html-frame').boundingBox();assert.ok(box.height>300);assert.ok(box.y>=0&&box.y+box.height<=viewport.height+1);await frame.locator('#end').scrollIntoViewIfNeeded();assert.ok(await frame.locator('#end').isVisible());
   }
